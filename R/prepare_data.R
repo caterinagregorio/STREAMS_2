@@ -64,24 +64,7 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
   scheme_data <- scheme_data %>%
     mutate(interval = abs(ifelse(onset == 1, onset_age, death_time) - last_bfo))
 
-  # Imputation
-  impute_one <- function(x) {
-    if (is.numeric(x)) {
-      x[is.na(x)] <- mean(x, na.rm = TRUE)
-      return(x)
-    }
-    if (is.factor(x) || is.character(x)) {
-      mode_val <- names(sort(table(x), decreasing = TRUE))[1]
-      x[is.na(x)] <- mode_val
-      return(x)
-    }
-    x
-  }
 
-  scheme_data <- scheme_data %>%
-    mutate(across(all_of(cov_vector), impute_one))
-
-  out_scheme <- scheme_data
 
   # --- Step 2: Scaling (z-score on non-binary numeric covs)
   is_binary01 <- function(x) {
@@ -133,6 +116,19 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
     left_join(scores, by = "patient_id")
 
 
+  scheme_data_encoded <- fastDummies::dummy_cols(
+    scheme_data_scaled,
+    select_columns = names(Filter(is.factor, scheme_data_scaled)),
+    remove_first_dummy = TRUE,   # avoids multicollinearity
+    remove_selected_columns = TRUE
+  )
+  common_covs <- intersect(covariate_names, names(scheme_data_encoded))
+
+
+  only_in_encoded <- setdiff(names(scheme_data_encoded), names(scheme_data_scaled))
+
+  covariate_names_encoded <- unique(c(common_covs, only_in_encoded))
+
 
   # --- Step 4: Train + infer tables
   training_data <- scheme_data_scaled %>%
@@ -143,10 +139,10 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
       onset_soft = label_type
     ) %>%
     select(patient_id, age, a, b, onset_soft, onset_age, onset_prior,
-           dplyr::all_of(covariate_names))
+           dplyr::all_of(covariate_names_encoded))
 
   infer_data <- training_data %>%
-    select(patient_id, age, a, b, onset_prior, dplyr::all_of(covariate_names))
+    select(patient_id, age, a, b, onset_prior, dplyr::all_of(covariate_names_encoded))
 
   # --- Step 5: Save
   dir.create(dirname(train_path), recursive = TRUE, showWarnings = FALSE)
