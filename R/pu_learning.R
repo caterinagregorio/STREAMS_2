@@ -1,13 +1,109 @@
-pu_learning <- function(df, features_cl, features_prop, max_iter = 300, tol = 1e-3, clip = 1e-3, damp = 0.3, shrink_k = 0.0, verbose = TRUE) {
+#' Positive-unlabelled learning under a Selected-At-Random assumption
+#'
+#' This function implements an Expectation-maximization Positive–Unlabeled (PU) learning algorithm under
+#' Selection-At-Random (SAR) model for the labeling mechanism. It estimates:
+#' \itemize{
+#'   \item \eqn{p(x) = P(Y = 1 \mid X_p)}: probability of developing the disease given a set of
+#'          classification features \code{features_cl};
+#'   \item \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)}: propensity score, probability that a truly
+#'         positive case is labeled as positive, given the selection
+#'         features \code{features_prop};
+#'   \item the posterior probability \eqn{r = P(Y = 1 \mid X_p, S)} for unlabeled examples.
+#' }
+#'
+#'
+#' @param df A \code{data.frame} or \code{data.table} containing at least the
+#'   following columns:
+#'   \itemize{
+#'     \item \code{patient_id}: unique patient identifier;
+#'     \item \code{onset}: observed label indicator \code{S} (1 if the patient
+#'           is labeled positive, 0 otherwise);
+#'     \item all variables listed in \code{features_cl};
+#'     \item all variables listed in \code{features_prop}.
+#'   }
+#'   The function assumes one row per patient.
+#' @param features_cl Character vector with the names of the covariates used
+#'   to model the disease probability.
+#' @param features_prop Character vector with the names of the features explaining the
+#'   observation process or dependent on the follow-up itself.
+#' @param max_iter Integer, maximum number of EM iterations. Default is
+#'   \code{300}.
+#' @param tol Numeric, convergence tolerance on the log-likelihood difference
+#'   between successive iterations. Default is \code{1e-3}.
+#' @param clip Numeric, lower bound used to clip probabilities away from
+#'   \code{0} and \code{1} for numerical stability. Default is \code{1e-3}.
+#' @param damp Numeric in \eqn{(0,1)}, damping factor used to update
+#'   \eqn{p(x)} and \eqn{e(x)} as convex combinations of old and new estimates
+#'   to reduce oscillations. Default is \code{0.3}.
+#' @param shrink_k Numeric, non-negative shrinkage parameter. When
+#'   \code{shrink_k > 0}, \eqn{p(x)} is shrunk (via logit scaling)
+#'   more strongly where \eqn{e(x)} is small, effectively penalizing regions
+#'   with low labeling propensity. Default is \code{0.0} (no shrinkage).
+#' @param verbose Logical, if \code{TRUE} (default) prints the log-likelihood
+#'   and summary statistics at initialization and at each EM iteration.
+#'
+#' @details
+#' The function uses an EM-like procedure:
+#' \enumerate{
+#'   \item Initialize \code{p(x)} and \code{e(x)} under SCAR assumption.
+#'   \item Alternates between:
+#'         \itemize{
+#'           \item \strong{E-step:} computes posterior probabilities
+#'                 \eqn{r = P(Y = 1 \mid X_p, S)} for unlabeled examples;
+#'           \item \strong{M-step for \eqn{p(x)}:} refits a quasi-binomial GLM
+#'                 of \code{r} on \code{features_cl};
+#'           \item \strong{M-step for \eqn{e(x)}:} fits a weighted logistic GLM
+#'                 for the selection probability usingon \code{features_prop};
+#'         }
+#'   \item Calibrates the intercept of \eqn{e(x)} so that
+#'         \eqn{E[p(x) e(x)] \approx \bar{S}}, the observed fraction of labeled
+#'         positives.
+#' }
+#'
+#' @return A \code{tibble} with one row per patient and the following columns:
+#' \itemize{
+#'   \item \code{patient_id}: patient identifier copied from \code{df};
+#'   \item \code{onset}: observed label indicator \code{S};
+#'   \item \code{fhat}: initial estimate \eqn{P(S = 1 \mid X_p)} from a plain
+#'         logistic regression of \code{S} on \code{features_cl};
+#'   \item \code{p_pos}: final estimate \eqn{p(x) = P(Y = 1 \mid X_p)}, i.e.
+#'         of the disease probability based on \code{features_cl};
+#'   \item \code{e_prop}: final estimate \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)},
+#'         the selection probability;
+#'   \item \code{r}: posterior probability \eqn{P(Y = 1 \mid X, S)}; that equals
+#'         \code{1} for labeled positives (\code{S = 1}) and lies in \eqn{(0,1)}
+#'         for unlabeled cases;
+#'   \item \code{f_recon}: reconstructed probability \eqn{P(S = 1 \mid X_e, X_p)} under
+#'         the SAR model, given by \code{p(x) * e(x)}. Its average should be
+#'         close to the observed fraction of labeled positives \code{mean(S)}.
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Suppose df_patients has one row per patient and includes:
+#' # patient_id, onset, length_followup, number_visits, and some disease associated covariates
+#' features_cl   <- c("bmi0", "Hypertension", "Dyslipidemia")
+#' features_prop <- c("length_followup", "number_visits")
+#'
+#' pu_res <- pu_learning(
+#'   df            = df_patients,
+#'   features_cl   = features_cl,
+#'   features_prop = features_prop,
+#'   max_iter      = 200,
+#'   tol           = 1e-4,
+#'   verbose       = TRUE
+#' )
+#'
+#' head(pu_res)
+#' }
+#'
+pu_learning <- function(df, features_cl, features_prop, max_iter = 800, tol = 1e-3, clip = 1e-3, damp = 0.3, shrink_k = 0.0, verbose = TRUE) {
   stopifnot(all(c("patient_id","onset") %in% names(df)))
   eps <- 1e-12
 
   # -- build model matrices
   Xp <- model.matrix(reformulate(features_cl), df)
-  df$log_followup <- log1p(df$length_followup)
-  df$log_visits   <- log1p(df$visits)
-  form_e <- ~ scale(log_followup) + scale(log_visits) + scale(interval)
-  Xe <- model.matrix(form_e, data = df)
+  Xe <- model.matrix(reformulate(features_prop), data = df)
   Xp_n <- Xp[, -1, drop = FALSE]
   Xe_n <- Xe[, -1, drop = FALSE]
 
@@ -95,9 +191,9 @@ pu_learning <- function(df, features_cl, features_prop, max_iter = 300, tol = 1e
     patient_id = df$patient_id,
     onset      = S,        # observed positive indicator (S=1 if labeled positive)
     fhat       = fhat,     # initial P(S=1 | Xp) from a plain logistic on Xp
-    p_pos      = p,        # final P(Y=1 | Xp) disease risk (baseline-only features)
+    p_pos      = p,        # final P(Y=1 | Xp) disease risk
     e_prop     = e,        # final P(S=1 | Y=1, Xe) selection/labeling probability
     r          = r,        # posterior P(Y=1 | X, S): 1 for S=1; in (0,1) for S=0
-    f_recon    = p * e     # implied P(S=1 | X) under SAR: should match mean(S) on average
+    f_recon    = p * e     # implied P(S=1 | X_e, X_p) under SAR: should match mean(S) on average
   )
 }
