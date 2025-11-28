@@ -11,7 +11,7 @@
 #'   \item Fits multi-state models on each imputed dataset.
 #'   \item Combine the parameter estimates using Rubin's rules.
 #' }
-#' @param data A `data.table` or `data.frame` that must contain the following columns:
+#' @param panel_data A `data.table` or `data.frame` that must contain the following columns:
 #'   - `patient_id`: Unique identifier for each patient (numeric).
 #'   - `dead`: Binary indicator (0/1) for whether the patient is dead.
 #'   - `death_time`: Time of death if it has occurred or censoring time otherwise (numeric).
@@ -79,7 +79,7 @@ run_streams <- function(
   # folders: base/version/{data, models, results}
   version_dir <- file.path(base_out_dir, version_name)
   dirs <- list(
-    data = file.path(version_dir, "data"),
+    data     = file.path(version_dir, "data"),
     models   = file.path(version_dir, "models"),
     results  = file.path(version_dir, "results")
   )
