@@ -13,7 +13,7 @@ pu_learning(
   clip = 0.001,
   damp = 0.3,
   shrink_k = 0,
-  verbose = TRUE
+  verbose = FALSE
 )
 }
 \arguments{
@@ -35,7 +35,7 @@ to model the disease probability.}
 observation process or dependent on the follow-up itself.}
 
 \item{max_iter}{Integer, maximum number of EM iterations. Default is
-\code{300}.}
+\code{800}.}
 
 \item{tol}{Numeric, convergence tolerance on the log-likelihood difference
 between successive iterations. Default is \code{1e-3}.}
@@ -45,10 +45,11 @@ between successive iterations. Default is \code{1e-3}.}
 
 \item{damp}{Numeric in \eqn{(0,1)}, damping factor used to update
 \eqn{p(x)} and \eqn{e(x)} as convex combinations of old and new estimates
-to reduce oscillations. Default is \code{0.3}.}
+to reduce oscillations. \code{damp} = 1 correspondes to null contribute of the old estimate.
+Default is \code{0.3}.}
 
 \item{shrink_k}{Numeric, non-negative shrinkage parameter. When
-\code{shrink_k > 0}, \eqn{p(x)} is shrunk (via logit scaling)
+\code{shrink_k > 0}, \eqn{p(x)} is shrunk
 more strongly where \eqn{e(x)} is small, effectively penalizing regions
 with low labeling propensity. Default is \code{0.0} (no shrinkage).}
 
@@ -60,17 +61,17 @@ A \code{tibble} with one row per patient and the following columns:
 \itemize{
 \item \code{patient_id}: patient identifier copied from \code{df};
 \item \code{onset}: observed label indicator \code{S};
-\item \code{fhat}: initial estimate \eqn{P(S = 1 \mid X_p)} from a plain
+\item \code{fhat}: initial estimate \eqn{P(S = 1 \mid X_p)} under SCAR from a
 logistic regression of \code{S} on \code{features_cl};
 \item \code{p_pos}: final estimate \eqn{p(x) = P(Y = 1 \mid X_p)}, i.e.
 of the disease probability based on \code{features_cl};
 \item \code{e_prop}: final estimate \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)},
 the selection probability;
-\item \code{r}: posterior probability \eqn{P(Y = 1 \mid X, S)}; that equals
+\item \code{r}: posterior probability \eqn{P(Y = 1 \mid X_p, X_e, S)}; that equals
 \code{1} for labeled positives (\code{S = 1}) and lies in \eqn{(0,1)}
 for unlabeled cases;
 \item \code{f_recon}: reconstructed probability \eqn{P(S = 1 \mid X_e, X_p)} under
-the SAR model, given by \code{p(x) * e(x)}. Its average should be
+the SAR model, given by \code{p(x)} * \code{e(x)}. Its average should be
 close to the observed fraction of labeled positives \code{mean(S)}.
 }
 }
@@ -83,18 +84,18 @@ classification features \code{features_cl};
 \item \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)}: propensity score, probability that a truly
 positive case is labeled as positive, given the selection
 features \code{features_prop};
-\item the posterior probability \eqn{r = P(Y = 1 \mid X_p, S)} for unlabeled examples.
+\item the posterior probability \eqn{r = P(Y = 1 \mid X_p, x_e, S)} for unlabeled examples.
 }
 }
 \details{
-#' The function uses an EM-like procedure:
+The function uses an EM-like procedure:
 \enumerate{
 \item Initialize \code{p(x)} and \code{e(x)} under SCAR assumption.
 \item Alternates between:
 \itemize{
 \item \strong{E-step:} computes posterior probabilities
-\eqn{r = P(Y = 1 \mid X_p, S)} for unlabeled examples;
-\item \strong{M-step for \eqn{p(x)}:} refits a quasi-binomial GLM
+\eqn{r = P(Y = 1 \mid X_p, X_e, S)} for unlabeled examples;
+\item \strong{M-step for \eqn{p(x)}:} fits a quasi-binomial GLM
 of \code{r} on \code{features_cl};
 \item \strong{M-step for \eqn{e(x)}:} fits a weighted logistic GLM
 for the selection probability usingon \code{features_prop};

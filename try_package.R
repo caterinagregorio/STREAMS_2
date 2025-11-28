@@ -28,3 +28,4 @@ panel_data <- panel_data %>%
   mutate(across(all_of(cov_vector), impute_one))
 
 check_input_data(panel_data)
+

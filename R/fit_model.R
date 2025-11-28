@@ -63,6 +63,10 @@
 #' )
 #' }
 #'
+#' @importFrom mstate transMat msprep
+#' @importFrom stats as.formula
+#' @importFrom survival Surv
+#' @importFrom flexsurv flexsurvreg
 #' @export
 
 fit_model <- function(data, cov_vector, clock_assumption, distribution,

@@ -23,7 +23,11 @@
 #'   missing values in required columns (columns: `row`, `col`). If no missing
 #'   values are present, the attribute is `NULL`.
 #'
+#' @importFrom utils head
+#' @importFrom data.table as.data.table is.data.table
 #' @export
+
+
 check_input_data <- function(data) {
   # ---- basic class check ----
   if (!inherits(data, "data.frame")) {

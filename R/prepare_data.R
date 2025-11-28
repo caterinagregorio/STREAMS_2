@@ -1,29 +1,11 @@
-#' BISOGNA CONTROLLARE CON ATTENZIONE TUTTA FUNZIONE E SCRIVERE BENE DESCRIZIONE
-#' Prepare per-patient training and inference data for trajectory reconstruction
+#' Prepare patient-level data for PU-learning and downstream modeling saving training and inference preprocessed data.
 #'
-#' This function takes visit-level longitudinal data and constructs per-patient
-#' datasets ready to be used for semi-supervised trajectory reconstruction
-#' \itemize{
-#'   \item orders visits by \code{patient_id} and \code{visits};
-#'   \item computes the last age before first onset (\code{last_bfo}) and
-#'         patient-level onset status;
-#'   \item derives follow-up summaries such as \code{length_followup},
-#'         \code{visits} and \code{visit_rate};
-#'   \item builds a per-patient table and a follow-up interval
-#'         (\code{interval}) between \code{last_bfo} and
-#'         onset or censoring time;
-#'   \item scales non-binary numeric covariates with z-scores;
-#'   \item runs PU learning via \code{\link{pu_learning}} to obtain
-#'         \code{p_pos} (prior onset probability) and a semi-supervised
-#'         label \code{label_type};
-#'   \item dummy-encodes factor covariates using
-#'         \code{fastDummies::dummy_cols()}, adding the newly created
-#'         dummy variables to the original \code{covariate_names};
-#'   \item builds and saves a training table and an inference table as
-#'         Feather files.
-#' }
+#' @description
+#' Processes longitudinal patient visit data to generate a patient-level dataset enriched with derived features,
+#' scaled covariates, and PU-learning scores under the SAR assumption. It also creates training and inference datasets
+#' with preprocessed data and saves them in Feather format for efficient downstream use.
 #'
-#' @param data A `data.table` or `data.frame` that must contain the following columns with no missing values:
+#' @param data A `data.table` or `data.frame` that must contain the following columns:
 #'   - `patient_id`: Unique identifier for each patient (numeric).
 #'   - `dead`: Binary indicator (0/1) for whether the patient is dead.
 #'   - `death_time`: Time of death if it has occurred or censoring time otherwise (numeric).
@@ -33,97 +15,41 @@
 #'   - `visits`: Indicator of the current visit (numeric).
 #'   The `data.frame` can contain extra columns with covariate values.
 #'
-#' @param cov_vector Character vector with the names of covariates to be used
-#'   as inputs for the PU-learning step. These variables are taken from
-#'   \code{scheme_data} (after scaling of non-binary numeric covariates).
-#'
-#' @param covariate_names Character vector with the names of covariates that
-#'   should enter the final training and inference tables. After dummy
-#'   encoding, the function constructs \code{covariate_names_encoded} by
-#'   keeping:
-#'   \itemize{
-#'     \item those covariates in \code{covariate_names} that still exist in
-#'           \code{scheme_data_encoded};
-#'     \item plus all columns that are present only in the encoded data
-#'           (typically the dummy variables created from factor covariates).
-#'   }
-#' @param lab_prop Numeric scalar in \eqn{(0, 1)} indicating the proportion of
-#'   patients with \code{onset == 0} to be treated as reliable negatives in the
-#'   PU-learning step. Patients below the corresponding quantile of
-#'   \code{p_pos} are assigned \code{label_type = 0}, while patients with
-#'   \code{onset == 1} are assigned \code{label_type = 1}, and the remaining
-#'   patients receive \code{NA}.
-#' @param train_path Character scalar giving the file path where the per-patient
-#'   training dataset should be saved as a Feather file
-#'   (via \code{arrow::write_feather()}).
-#' @param infer_path Character scalar giving the file path where the per-patient
-#'   inference dataset should be saved as a Feather file.
+#' @param cov_vector Character vector of covariate names to include in modeling. These will be scaled and encoded as needed.
+#' @param lab_prop Numeric value (0–1) specifying the proportion of unlabeled patients to assign as negative in PU-learning thresholding.
+#' @param train_path File path where the processed training dataset will be saved in Feather format.
+#' @param infer_path File path where the processed inference dataset will be saved in Feather format.
 #'
 #' @details
-#' The function first aggregates visit-level data to patient-level summaries.
-#' \code{last_bfo} is defined as the last observed age before first onset; if a
-#' patient never experiences onset, \code{last_bfo} is set to the age at the
-#' last visit. The follow-up interval \code{interval} is computed as the
-#' absolute difference between \code{last_bfo} and the event time
-#' (\code{onset_age} if \code{onset == 1}, or \code{death_time} otherwise).
-#'
-#' PU learning is performed by \code{\link{pu_learning}}, which is expected to
-#' return at least the columns \code{patient_id}, \code{onset} and \code{p_pos}.
-#' From these, the function constructs a semi-supervised label
-#' \code{label_type} based on \code{lab_prop}.
-#'
-#' Factor covariates in \code{scheme_data_scaled} are dummy-encoded using
-#' \code{fastDummies::dummy_cols()} with \code{remove_first_dummy = TRUE} and
-#' \code{remove_selected_columns = TRUE}, so that the original factor columns
-#' are removed and replaced by (k-1) dummy variables.
-#'
-#' The training dataset contains, for each patient:
-#' \itemize{
-#'   \item \code{patient_id}, \code{age};
-#'   \item \code{a}: \code{last_bfo};
-#'   \item \code{b}: \code{onset_age} if \code{onset == 1}, otherwise
-#'         \code{death_time};
-#'   \item \code{onset_soft}: the semi-supervised label \code{label_type};
-#'   \item \code{onset_age}, \code{onset_prior} (\code{p_pos});
-#'   \item all covariates in \code{covariate_names_encoded}.
+#' The function performs the following steps:
+#' \enumerate{
+#'   \item Feature engineering: Calculates hand crafted covariates.
+#'   \item Scaling: Applies z-score normalization to numeric covariates.
+#'   \item Encoding: Performs one-hot encoding of categorical variables.
+#'   \item PU-learning: Estimates onset priors (\code{p_pos}) and assigns soft labels (\code{label_type}) based on \code{lab_prop}.
+#'   \item Output preparation: Creates training and inference datasets and saves them as Feather files.
 #' }
 #'
-#' The inference dataset is a reduced version of the training dataset that drops
-#' \code{onset_soft} and \code{onset_age}, and keeps
-#' \code{patient_id}, \code{age}, \code{a}, \code{b}, \code{onset_prior} and the
-#' encoded covariates.
-#'
-#' @return
-#' (To be aligned with the function body.)
-#' Currently the function writes two Feather files to \code{train_path} and
-#' \code{infer_path}. You may want to make the function return, for example,
-#' a list such as:
-#' \code{list(training_data = training_data, infer_data = infer_data,
-#' covariate_names_encoded = covariate_names_encoded)}.
-#'
-#' @seealso \code{\link{pu_learning}}, \code{fastDummies::dummy_cols()},
-#'   \code{arrow::write_feather()}
+#' @return A processed data frame with patient-level information that will be used for fitting the multi-state models.
+#' Processed datasets are saved to disk at \code{train_path} and \code{infer_path}.
 #'
 #' @examples
 #' \dontrun{
-#' train_file  <- "data/processed/train.feather"
-#' infer_file  <- "data/processed/infer.feather"
-#'
-#' cov_vector       <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia")
-#' covariate_names  <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia",
-#'                       "educ_el", "ALCO_CONSUMP")
-#'
-#' out <- prepare_data(
-#'   data            = visits_data,
-#'   cov_vector      = cov_vector,
-#'   covariate_names = covariate_names,
-#'   lab_prop        = 0.2,
-#'   train_path      = train_file,
-#'   infer_path      = infer_file
+#' prepare_data(
+#'   data = panel_data,
+#'   cov_vector = c("sex", "bmi", "smoking_status"),
+#'   lab_prop = 0.2,
+#'   train_path = "output/train.feather",
+#'   infer_path = "output/infer.feather"
 #' )
 #' }
+#'
+#' @import dplyr data.table fastDummies arrow
+#' @importFrom stats quantile
+#' @export
 
-prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path, infer_path) {
+
+prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
 
 
   # --- Step 0: basic ordering
@@ -178,7 +104,8 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
     select(-last_visit_age)
 
 
-  # Adding variables for PU length_followup from full visit table
+  # --- Step 2: Building variables related to follow-up process for PU-learning from full visit table
+  # number of visits, length of the interval for possible disease development, frequency of visits
   len_fu <- scheme_visits %>%
     group_by(patient_id) %>%
     summarize(length_followup = first(death_time) - min(age, na.rm = TRUE),
@@ -193,7 +120,8 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
 
   features_prop <- c( "visits", "interval", "visit_rate")
 
-  # --- Step 2: Scaling (z-score on non-binary numeric covs)
+
+  # --- Step 3: Scaling (z-score on numeric features cl and propensity for pu learning)
   is_binary01 <- function(x) {
     if (!is.numeric(x)) return(FALSE)
     ux <- unique(na.omit(x))
@@ -218,13 +146,11 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
     }
   }
 
-  # --- Step 3: Priors (PU)
+  # --- Step 4: Computing priors of disease onset with PU learning under SAR assumption
 
   features_cl   <- unique(c(cov_vector, "age"))
   features_prop <- c( "visits", "interval", "visit_rate")
 
-
-  # sar_em_pu must return columns: patient_id, onset (0/1), p_pos
   scores <- pu_learning(scheme_data_scaled, features_cl, features_prop)
 
   zero_candidates <- scores %>% filter(onset == 0) %>% arrange(desc(p_pos))
@@ -242,21 +168,21 @@ prepare_data <- function(data, cov_vector, covariate_names, lab_prop, train_path
   scheme_data_scaled <- scheme_data_scaled %>%
     left_join(scores, by = "patient_id")
 
+  # --- Step 5: Preprocessing for the following phase: one-hot encoding
   scheme_data_encoded <- fastDummies::dummy_cols(
     scheme_data_scaled,
     select_columns = names(Filter(is.factor, scheme_data_scaled)),
     remove_first_dummy = TRUE,   # avoids multicollinearity
     remove_selected_columns = TRUE
   )
-  common_covs <- intersect(covariate_names, names(scheme_data_encoded))
-
+  common_covs <- intersect(cov_vector, names(scheme_data_encoded))
 
   only_in_encoded <- setdiff(names(scheme_data_encoded), names(scheme_data_scaled))
 
   covariate_names_encoded <- unique(c(common_covs, only_in_encoded))
 
 
-  # --- Step 4: Train + infer tables
+  # --- Step 5: Sacving Train and infer data
   training_data <- scheme_data_encoded %>%
     mutate(
       a = last_bfo,

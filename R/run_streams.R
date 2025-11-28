@@ -1,3 +1,54 @@
+#' DA  SISTEMARE TUTTE LE DIRECTORY E PARAMETRI DELLE FUNZIONI NESTED CHE VOGLIO LASCIARE MODIFICABILI
+#' Run STREAMS Pipeline
+#'
+#' @description
+#' Executes the full STREAMS workflow:
+#' \enumerate{
+#'   \item Prepares longitudinal panel data for PU-learning and downstream modeling.
+#'   \item Calls Python scripts for training and inference. This phase exploits a Mean Teacher conditional
+#'   variational autoencoder generating a individual-level posterior distribution for disease onset and onset age.
+#'   \item Performs multiple imputation of complete trajectories.
+#'   \item Fits multi-state models on each imputed dataset.
+#'   \item Combine the parameter estimates using Rubin's rules.
+#' }
+#' @param data A `data.table` or `data.frame` that must contain the following columns:
+#'   - `patient_id`: Unique identifier for each patient (numeric).
+#'   - `dead`: Binary indicator (0/1) for whether the patient is dead.
+#'   - `death_time`: Time of death if it has occurred or censoring time otherwise (numeric).
+#'   - `onset`: Binary indicator (0/1) for disease onset.
+#'   - `onset_age`: Age at disease onset if it has occurred or `death_time` otherwise (numeric).
+#'   - `age`: Patient's current age at that specific visit (numeric).
+#'   - `visits`: Indicator of the current visit (numeric).
+#' @param cov_vector Character vector of covariate names for modeling.
+#' @param version_name String specifying version identifier for output directories.
+#' @param base_out_dir Base directory for versioned outputs (default: `"py/version"`).
+#' @param train_py Path to Python training script.
+#' @param infer_py Path to Python inference script.
+#' @param lab_prop Proportion for PU-learning thresholding. Default = 0.5.
+#' @param train_args Named list of additional CLI arguments for training script.
+#' @param infer_args Named list of additional CLI arguments for inference script.
+#' @param m Number of imputations for onset age sampling (default = 20).
+#' @param clock_assumption Clock assumption for multi-state modeling (`"forward"` or `"mix"`).
+#' @param distribution Distribution for parametric survival models (e.g., `"gompertz"`).
+#' @param n_cores Number of cores for parallel fitting (default = 4).
+#'
+#' @return A matrix of averaged parameter estimates across imputations.
+#'
+#' @examples
+#' \dontrun{
+#' est_params <- run_streams(
+#'   panel_data = df_panel,
+#'   cov_vector = c("sex", "bmi", "smoking"),
+#'   version_name = "v1",
+#'   train_py = "py/training.py",
+#'   infer_py = "py/inference.py"
+#' )
+#' }
+#'
+#' @import dplyr tibble arrow data.table flexsurv mstate survival parallel truncnorm stats pROC
+#' @importFrom utils head
+#' @export
+
 run_streams <- function(
     panel_data,
     cov_vector,
@@ -6,7 +57,6 @@ run_streams <- function(
     train_py = "py/training_fix_dec4.0.py",
     infer_py = "py/inference_fix_dec4.0.py",
     lab_prop = 0.5,
-    covariate_names = NULL,     # if NULL uses cov_vector
     train_args = list("--prior_aug"="beta"),  #args to change according to versions
     infer_args = list(),
     m = 20,
@@ -18,8 +68,6 @@ run_streams <- function(
   pkgs <- c("dplyr","tibble","arrow","data.table","flexsurv","mstate",
             "survival","parallel","truncnorm","stats", "pROC")
   suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
-
-  if (is.null(covariate_names)) covariate_names <- cov_vector
 
   # --- helper: list -> vector args CLI
   as_cli_args <- function(arg_list) {
@@ -53,14 +101,13 @@ run_streams <- function(
   cleaned_data <- prepare_data(
     data = panel_data,
     cov_vector = cov_vector,
-    covariate_names = covariate_names,
     lab_prop = lab_prop,
     train_path  = input_path_train,
     infer_path = input_path_infer
   )
   save(cleaned_data, file = cleaned_rdata)
 
-  cov_str <- paste(covariate_names, collapse = ",")
+  cov_str <- paste(cov_vector, collapse = ",")
 
   # --- TRAINING PY
   train_cli <- c(
