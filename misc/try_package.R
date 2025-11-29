@@ -1,7 +1,7 @@
 # ===================== Run over real data  ========================
 library(dplyr)
 library(devtools)
-panel_data <- readRDS("panel_data.RDS")
+#panel_data <- readRDS("panel_data.RDS")
 panel_data <- panel_data %>%
   filter(!is.na(onset))
 

@@ -153,7 +153,7 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
 
   scores <- pu_learning(scheme_data_scaled, features_cl, features_prop)
 
-  zero_candidates <- scores %>% filter(onset == 0) %>% arrange(desc(p_pos))
+  zero_candidates <- scores %>% dplyr::filter(onset == 0) %>% arrange(desc(p_pos))
   thresh <- as.numeric(quantile(zero_candidates$p_pos, lab_prop, na.rm = TRUE))
   zero_onset_ids <- zero_candidates$patient_id[zero_candidates$p_pos < thresh]
 

@@ -44,30 +44,29 @@
 #'   infer_py = "py/inference.py"
 #' )
 #' }
-#'
-#' @import dplyr tibble arrow data.table flexsurv mstate survival parallel truncnorm stats pROC
+#' @import dplyr
+#' @importFrom tibble tibble
+#' @importFrom arrow read_feather write_feather
+#' @import data.table
+#' @importFrom flexsurv flexsurvreg
+#' @import mstate
+#' @importFrom survival Surv
+#' @importFrom truncnorm rtruncnorm dtruncnorm
+#' @importFrom pROC roc auc
 #' @importFrom utils head
 #' @export
 
 run_streams <- function(
     panel_data,
     cov_vector,
-    version_name,
-    base_out_dir = file.path("py", "version"),
-    train_py = "py/training_fix_dec4.0.py",
-    infer_py = "py/inference_fix_dec4.0.py",
     lab_prop = 0.5,
-    train_args = list("--prior_aug"="beta"),  #args to change according to versions
+    train_args = list("--prior_aug"="beta"),
     infer_args = list(),
     m = 20,
     clock_assumption = "forward",
     distribution = "gompertz",
     n_cores = 4
 ) {
-
-  pkgs <- c("dplyr","tibble","arrow","data.table","flexsurv","mstate",
-            "survival","parallel","truncnorm","stats", "pROC")
-  suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
 
   # --- helper: list -> vector args CLI
   as_cli_args <- function(arg_list) {
@@ -77,17 +76,18 @@ run_streams <- function(
 
 
   # folders: base/version/{data, models, results}
-  version_dir <- file.path(base_out_dir, version_name)
+  results_folder <- file.path(getwd(), "results_py")
+  if (!dir.exists(results_folder)) dir.create(results_folder)
   dirs <- list(
-    data     = file.path(version_dir, "data"),
-    models   = file.path(version_dir, "models"),
-    results  = file.path(version_dir, "results")
+    data     = file.path(results_folder, "data"),
+    models   = file.path(results_folder, "models"),
+    results  = file.path(results_folder, "results")
   )
   invisible(lapply(dirs, dir.create, recursive = TRUE, showWarnings = FALSE))
 
 
   input_path_train <- file.path(dirs$data, "training_data.feather")
-  input_path_infer <- file.path(dirs$data,    "infer_data.feather")
+  input_path_infer <- file.path(dirs$data,    "inference_data.feather")
   train_split      <- file.path(dirs$data, "train_split.feather")
   val_split        <- file.path(dirs$data, "val_split.feather")
   model_path       <- file.path(dirs$models,   "best_model.pt")
