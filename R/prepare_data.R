@@ -89,7 +89,6 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
     select(-visits) %>%
     select(-onset)
 
-  out_scheme <- scheme_data
 
   # Attach markers
   scheme_data <- scheme_data %>%
@@ -103,6 +102,7 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
     mutate(last_bfo = ifelse(onset == 1, last_bfo, last_visit_age)) %>%
     select(-last_visit_age)
 
+  out_scheme <- scheme_data
 
   # --- Step 2: Building variables related to follow-up process for PU-learning from full visit table
   # number of visits, length of the interval for possible disease development, frequency of visits
@@ -204,5 +204,5 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
 
   # Clean return (without PU internals)
   out_scheme <- as.data.frame(out_scheme)
-  return(out_scheme)
+  return(list(out_scheme, covariate_names_encoded))
 }

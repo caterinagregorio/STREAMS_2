@@ -120,14 +120,14 @@ pu_learning <- function(df, features_cl, features_prop, max_iter = 800, tol = 1e
   n     <- length(S)
   s_bar <- mean(S) #mean observed diseases
 
-  # -- init: fhat = P(S=1|Xp) via plain logistic, then SCAR start
-  fit_f <- stats::glm(S ~ Xp_n, family = stats::binomial()) #P(S=1∣Xp)=P(Y=1∣Xp)P(S=1∣Y=1,Xp)=p(x)e(x) under scar
+  # -- init: fhat = P(S=1 given Xp) via plain logistic, then SCAR start
+  fit_f <- stats::glm(S ~ Xp_n, family = stats::binomial()) #P(S=1 given Xp)=P(Y=1 given Xp)P(S=1 given Y=1,Xp)=p(x)e(x) under scar
   fhat  <- as.numeric(stats::predict(fit_f, type = "response"))
   fhat  <- pmin(pmax(fhat, clip), 1 - clip)
 
-  c_hat <- mean(fhat[S == 1], na.rm = TRUE); if (!is.finite(c_hat) || c_hat <= clip) c_hat <- 0.5  # labelling rate among true positive P(S=1|Y=1)
+  c_hat <- mean(fhat[S == 1], na.rm = TRUE); if (!is.finite(c_hat) || c_hat <= clip) c_hat <- 0.5  # labelling rate among true positive P(S=1 given Y=1)
   p <- pmin(pmax(fhat / c_hat, clip), 1 - clip) # P(Y=1∣Xp) inverted from above expression
-  e <- rep(pmin(pmax(c_hat, 0.05), 0.99), n) #selection model initialized as constant P(S=1|Y=1) = c_hat but actually e(x) = P(S=1∣Y=1,Xp)
+  e <- rep(pmin(pmax(c_hat, 0.05), 0.99), n) #selection model initialized as constant P(S=1 given Y=1) = c_hat but actually e(x) = P(S=1 given Y=1,Xp)
 
   ll <- function(p, e) {
     pe <- p * e
@@ -140,7 +140,7 @@ pu_learning <- function(df, features_cl, features_prop, max_iter = 800, tol = 1e
   for (it in 1:max_iter) {
     p_old <- p; e_old <- e
 
-    # ---- E-step: r = P(Y=1 | X, S) if S=1 -> r=1 if S=0 -> P(S=0∣Y=1,X)P(Y=1∣X)/P(S=0|X) = (1-e)*p/(1-p*e)
+    # ---- E-step: r = P(Y=1 given X, S) if S=1 -> r=1 if S=0 -> P(S=0 given Y=1,X)P(Y=1 given X)/P(S=0 given X) = (1-e)*p/(1-p*e)
     denom <- 1 - p * e
     r <- ifelse(S == 1, 1, pmin(pmax(p * (1 - e) / pmax(denom, eps), clip), 1 - clip))
 
@@ -194,10 +194,10 @@ pu_learning <- function(df, features_cl, features_prop, max_iter = 800, tol = 1e
   tibble::tibble(
     patient_id = df$patient_id,
     onset      = S,        # observed positive indicator (S=1 if labeled positive)
-    fhat       = fhat,     # initial P(S=1 | Xp) from a plain logistic on Xp
-    p_pos      = p,        # final P(Y=1 | Xp) disease risk
-    e_prop     = e,        # final P(S=1 | Y=1, Xe) selection/labeling probability
-    r          = r,        # posterior P(Y=1 | X, S): 1 for S=1; in (0,1) for S=0
-    f_recon    = p * e     # implied P(S=1 | X_e, X_p) under SAR: should match mean(S) on average
+    fhat       = fhat,     # initial P(S=1 given Xp) from a plain logistic on Xp
+    p_pos      = p,        # final P(Y=1 given Xp) disease risk
+    e_prop     = e,        # final P(S=1 given Y=1, Xe) selection/labeling probability
+    r          = r,        # posterior P(Y=1 given X, S): 1 for S=1; in (0,1) for S=0
+    f_recon    = p * e     # implied P(S=1 given X_e, X_p) under SAR: should match mean(S) on average
   )
 }

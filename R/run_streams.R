@@ -65,7 +65,8 @@ run_streams <- function(
     m = 20,
     clock_assumption = "forward",
     distribution = "gompertz",
-    n_cores = 4
+    n_cores = 4,
+    python = NULL
 ) {
 
   # --- helper: list -> vector args CLI
@@ -98,20 +99,21 @@ run_streams <- function(
 
 
   # --- clean data and prepare them for model
-  cleaned_data <- prepare_data(
+  temp <- prepare_data(
     data = panel_data,
     cov_vector = cov_vector,
     lab_prop = lab_prop,
     train_path  = input_path_train,
     infer_path = input_path_infer
   )
+  cleaned_data <- temp[[1]]
   save(cleaned_data, file = cleaned_rdata)
 
-  cov_str <- paste(cov_vector, collapse = ",")
+
+  cov_str <- paste(temp[[2]], collapse = ",")
 
   # --- TRAINING PY
   train_cli <- c(
-    train_py,
     model_path,
     input_path_train,
     train_split,
@@ -119,18 +121,19 @@ run_streams <- function(
     cov_str,
     as_cli_args(train_args)
   )
-  system2("python3", args = train_cli)
+  streams_python("train.py", train_cli, python = "python3")
+
+
 
   # --- INFERENCE PY
   infer_cli <- c(
-    infer_py,
     model_path,
     input_path_infer,
     cov_str,
     "--out", distributions_path,
     as_cli_args(infer_args)
   )
-  system2("python3", args = infer_cli)
+  streams_python("inference.py", infer_cli, python = python)
 
   # --- extract model predictions
   distributions <- arrow::read_feather(distributions_path)

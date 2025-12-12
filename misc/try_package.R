@@ -5,7 +5,6 @@ library(devtools)
 panel_data <- panel_data %>%
   filter(!is.na(onset))
 
-version_name <- "first_trial"
 cov_vector <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia", "educ_el", "ALCO_CONSUMP", "R_SMOKE", "ws0", "drugs0",
                 "dm_sex", "life_alone", "sei_long_cat", "fin_strain_early")
 

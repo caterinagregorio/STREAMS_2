@@ -8,10 +8,6 @@ Run STREAMS Pipeline}
 run_streams(
   panel_data,
   cov_vector,
-  version_name,
-  base_out_dir = file.path("py", "version"),
-  train_py = "py/training_fix_dec4.0.py",
-  infer_py = "py/inference_fix_dec4.0.py",
   lab_prop = 0.5,
   train_args = list(`--prior_aug` = "beta"),
   infer_args = list(),
@@ -22,15 +18,18 @@ run_streams(
 )
 }
 \arguments{
+\item{panel_data}{A \code{data.table} or \code{data.frame} that must contain the following columns:
+\itemize{
+\item \code{patient_id}: Unique identifier for each patient (numeric).
+\item \code{dead}: Binary indicator (0/1) for whether the patient is dead.
+\item \code{death_time}: Time of death if it has occurred or censoring time otherwise (numeric).
+\item \code{onset}: Binary indicator (0/1) for disease onset.
+\item \code{onset_age}: Age at disease onset if it has occurred or \code{death_time} otherwise (numeric).
+\item \code{age}: Patient's current age at that specific visit (numeric).
+\item \code{visits}: Indicator of the current visit (numeric).
+}}
+
 \item{cov_vector}{Character vector of covariate names for modeling.}
-
-\item{version_name}{String specifying version identifier for output directories.}
-
-\item{base_out_dir}{Base directory for versioned outputs (default: \code{"py/version"}).}
-
-\item{train_py}{Path to Python training script.}
-
-\item{infer_py}{Path to Python inference script.}
 
 \item{lab_prop}{Proportion for PU-learning thresholding. Default = 0.5.}
 
@@ -46,16 +45,13 @@ run_streams(
 
 \item{n_cores}{Number of cores for parallel fitting (default = 4).}
 
-\item{data}{A \code{data.table} or \code{data.frame} that must contain the following columns:
-\itemize{
-\item \code{patient_id}: Unique identifier for each patient (numeric).
-\item \code{dead}: Binary indicator (0/1) for whether the patient is dead.
-\item \code{death_time}: Time of death if it has occurred or censoring time otherwise (numeric).
-\item \code{onset}: Binary indicator (0/1) for disease onset.
-\item \code{onset_age}: Age at disease onset if it has occurred or \code{death_time} otherwise (numeric).
-\item \code{age}: Patient's current age at that specific visit (numeric).
-\item \code{visits}: Indicator of the current visit (numeric).
-}}
+\item{version_name}{String specifying version identifier for output directories.}
+
+\item{base_out_dir}{Base directory for versioned outputs (default: \code{"py/version"}).}
+
+\item{train_py}{Path to Python training script.}
+
+\item{infer_py}{Path to Python inference script.}
 }
 \value{
 A matrix of averaged parameter estimates across imputations.
@@ -81,5 +77,4 @@ est_params <- run_streams(
   infer_py = "py/inference.py"
 )
 }
-
 }
