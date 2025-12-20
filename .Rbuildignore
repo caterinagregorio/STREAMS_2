@@ -1,3 +1,5 @@
 ^STREAMS\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
+^misc$
+^results_py$

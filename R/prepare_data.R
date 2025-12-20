@@ -44,12 +44,16 @@
 #' )
 #' }
 #'
-#' @import dplyr data.table fastDummies arrow
+#' @importFrom magrittr %>%
+#' @importFrom dplyr arrange group_by summarize left_join mutate select slice ungroup
+#' @importFrom dplyr if_else case_when row_number all_of desc first n
 #' @importFrom stats quantile
+#' @importFrom fastDummies dummy_cols
+#' @importFrom arrow write_feather
 #' @export
 
 
-prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
+prepare_data <- function(data, cov_vector, lab_prop, pu_args, train_path, infer_path) {
 
 
   # --- Step 0: basic ordering
@@ -77,7 +81,7 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
     summarize(onset = as.integer(any(onset == 1)), .groups = "drop")
 
   # Last visit age per patient (for those without onset)
-  last_visit <- as.data.table(scheme_visits)[, .SD[which.max(visits)], by = patient_id]
+  last_visit <- data.table::as.data.table(scheme_visits)[, .SD[which.max(visits)], by = patient_id]
   last_visit <- as.data.frame(last_visit)[, c("patient_id", "age")]
   names(last_visit)[2] <- "last_visit_age"
 
@@ -151,7 +155,7 @@ prepare_data <- function(data, cov_vector, lab_prop, train_path, infer_path) {
   features_cl   <- unique(c(cov_vector, "age"))
   features_prop <- c( "visits", "interval", "visit_rate")
 
-  scores <- pu_learning(scheme_data_scaled, features_cl, features_prop)
+  scores <- pu_learning(scheme_data_scaled, features_cl, features_prop, pu_args)
 
   zero_candidates <- scores %>% dplyr::filter(onset == 0) %>% arrange(desc(p_pos))
   thresh <- as.numeric(quantile(zero_candidates$p_pos, lab_prop, na.rm = TRUE))

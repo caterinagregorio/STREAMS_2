@@ -4,17 +4,7 @@
 \alias{pu_learning}
 \title{Positive-unlabelled learning under a Selected-At-Random assumption}
 \usage{
-pu_learning(
-  df,
-  features_cl,
-  features_prop,
-  max_iter = 800,
-  tol = 0.001,
-  clip = 0.001,
-  damp = 0.3,
-  shrink_k = 0,
-  verbose = FALSE
-)
+pu_learning(df, features_cl, features_prop, pu_args = list())
 }
 \arguments{
 \item{df}{A \code{data.frame} or \code{data.table} containing at least the
@@ -34,27 +24,20 @@ to model the disease probability.}
 \item{features_prop}{Character vector with the names of the features explaining the
 observation process or dependent on the follow-up itself.}
 
-\item{max_iter}{Integer, maximum number of EM iterations. Default is
-\code{800}.}
-
-\item{tol}{Numeric, convergence tolerance on the log-likelihood difference
-between successive iterations. Default is \code{1e-3}.}
-
-\item{clip}{Numeric, lower bound used to clip probabilities away from
-\code{0} and \code{1} for numerical stability. Default is \code{1e-3}.}
-
-\item{damp}{Numeric in \eqn{(0,1)}, damping factor used to update
-\eqn{p(x)} and \eqn{e(x)} as convex combinations of old and new estimates
-to reduce oscillations. \code{damp} = 1 correspondes to null contribute of the old estimate.
-Default is \code{0.3}.}
-
-\item{shrink_k}{Numeric, non-negative shrinkage parameter. When
-\code{shrink_k > 0}, \eqn{p(x)} is shrunk
-more strongly where \eqn{e(x)} is small, effectively penalizing regions
-with low labeling propensity. Default is \code{0.0} (no shrinkage).}
-
-\item{verbose}{Logical, if \code{TRUE} (default) prints the log-likelihood
-and summary statistics at initialization and at each EM iteration.}
+\item{pu_args}{Named list of optional arguments controlling the EM algorithm.
+Supported keys are:
+\itemize{
+\item \code{max_iter}: Integer, maximum number of EM iterations (default \code{800}).
+\item \code{tol}: Numeric, convergence tolerance on the log-likelihood difference (default \code{1e-3}).
+\item \code{clip}: Numeric, probability clipping bound for numerical stability (default \code{1e-3}).
+\item \code{damp}: Numeric in \eqn{(0,1)}, damping factor for convex updates of \eqn{p(x)} and \eqn{e(x)}
+(default \code{0.3}). \code{damp}=1 uses only the new estimates (no damping).
+\item \code{shrink_k}: Numeric, non-negative shrinkage parameter for \eqn{p(x)} in regions with low \eqn{e(x)}
+(default \code{0.0}).
+\item \code{verbose}: Logical, if \code{TRUE} prints log-likelihood and summary statistics at each iteration
+(default \code{FALSE}).
+}
+Any provided values override the defaults.}
 }
 \value{
 A \code{tibble} with one row per patient and the following columns:
@@ -76,15 +59,15 @@ close to the observed fraction of labeled positives \code{mean(S)}.
 }
 }
 \description{
-This function implements an Expectation-maximization Positive–Unlabeled (PU) learning algorithm under
-Selection-At-Random (SAR) model for the labeling mechanism. It estimates:
+This function implements an Expectation-maximization PositiveUnlabeled (PU) learning algorithm under
+SelectionAtRandom (SAR) model for the labeling mechanism. It estimates:
 \itemize{
 \item \eqn{p(x) = P(Y = 1 \mid X_p)}: probability of developing the disease given a set of
 classification features \code{features_cl};
 \item \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)}: propensity score, probability that a truly
 positive case is labeled as positive, given the selection
 features \code{features_prop};
-\item the posterior probability \eqn{r = P(Y = 1 \mid X_p, x_e, S)} for unlabeled examples.
+\item the posterior probability \eqn{r = P(Y = 1 \mid X_p, X_e, S)} for unlabeled examples.
 }
 }
 \details{

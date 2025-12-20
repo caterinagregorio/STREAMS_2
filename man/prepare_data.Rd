@@ -4,7 +4,7 @@
 \alias{prepare_data}
 \title{Prepare patient-level data for PU-learning and downstream modeling saving training and inference preprocessed data.}
 \usage{
-prepare_data(data, cov_vector, lab_prop, train_path, infer_path)
+prepare_data(data, cov_vector, lab_prop, pu_args, train_path, infer_path)
 }
 \arguments{
 \item{data}{A \code{data.table} or \code{data.frame} that must contain the following columns:

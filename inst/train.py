@@ -7,6 +7,7 @@ import pyarrow.feather as feather
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
@@ -344,6 +345,7 @@ def train_all(
     input_path,
     train_path,
     val_path,
+    logs_path, 
     covariate_cols,
     latent_dim,
     max_epochs,
@@ -414,12 +416,16 @@ def train_all(
     sched = ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=6)
 
     best, bad = float("inf"), 0
+    os.makedirs(os.path.dirname(logs_path), exist_ok=True)
+    logs_rows = []
+
 
     for epoch in range(1, max_epochs + 1):
+       
         student.train()
         beta = min(max_beta, epoch / max(1, warmup_epochs))
 
-        logs = {k: 0.0 for k in ["sup_bce", "age", "sd", "pair", "fix", "kl", "age_u", "age_cons", "total"]}
+        logs = {k: 0.0 for k in ["sup_bce", "age", "sd", "pair", "fix", "fix_raw", "fix_w", "kl", "age_u", "age_cons", "total"]}
         sel_num = 0.0
         sel_pos_num = 0.0
         sel_neg_num = 0.0
@@ -529,9 +535,21 @@ def train_all(
             L_age_u = interval_gaussian_nll(mu_age_s, sd_age_s, a, b, mask_u_pos) * age_u_w
 
             # ---- Classification consistency (FixMatch) ----
-            L_fix_all = F.binary_cross_entropy(p_s.clamp(1e-6, 1 - 1e-6), y_hat, reduction="none")
-            L_fix = (L_fix_all * sel).sum() / (sel.sum().clamp_min(1.0))
-            L_fix = L_fix * (lambda_fix_max * min(1.0, epoch / max(1, fix_ramp_epochs)))
+            L_fix_all = F.binary_cross_entropy(
+                p_s.clamp(1e-6, 1 - 1e-6), y_hat, reduction="none"
+            )
+            
+            fix_raw = (L_fix_all * sel).sum() / (sel.sum().clamp_min(1.0))
+            
+            e0 = fix_ramp_epochs
+            fix_w = lambda_fix_max * min(1.0, epoch / max(1, e0))
+            if epoch > e0:
+                gamma = 0.02
+                fix_w = fix_w * math.exp(-gamma * (epoch - e0))  # light decay post saturation
+                fix_w = max(0.25 * lambda_fix_max, fix_w)        # floor
+            
+            L_fix = fix_raw * fix_w
+
 
             # ---- Age consistency with EMA teacher (on the SAME augmented prior) ----
             with torch.no_grad():
@@ -562,11 +580,16 @@ def train_all(
             logs["age"] += float(L_age)
             logs["sd"] += float(L_sd)
             logs["pair"] += float(L_pair)
-            logs["fix"] += float(L_fix)
             logs["kl"] += float(L_kl)
             logs["age_u"] += float(L_age_u)
             logs["age_cons"] += float(L_age_cons)
             logs["total"] += float(L_tot)
+            logs["fix_raw"] += float(fix_raw)
+            logs["fix_w"] += float(fix_w)
+            logs["fix"] += float(L_fix)
+          
+
+
 
             sel_num += float(sel.sum())
             unl_num += float((1.0 - lab).sum())
@@ -593,6 +616,44 @@ def train_all(
         )
 
         sched.step(val["total"])
+        
+        # ---- Save epoch logs to feather ----
+        lr_now = opt.param_groups[0]["lr"]
+        row = {
+            "epoch": epoch,
+            "beta": beta,
+            "lr": lr_now,
+
+            # train
+            "train_sup_bce": logs["sup_bce"],
+            "train_age": logs["age"],
+            "train_age_u": logs["age_u"],
+            "train_age_cons": logs["age_cons"],
+            "train_sd": logs["sd"],
+            "train_pair": logs["pair"],
+            "train_fix_raw": logs["fix_raw"],
+            "train_fix": logs["fix"],
+            "train_fix_w": logs["fix_w"],
+            "train_kl": logs["kl"],
+            "train_total": logs["total"],
+
+            # selection stats
+            "sel_rate": sel_rate,
+            "sel_pos": float(sel_pos_num),
+            "sel_neg": float(sel_neg_num),
+            "unlabeled": float(unl_num),
+
+            # val (teacher)
+            "val_total": val["total"],
+            "val_bce": val["bce"],
+            "val_age": val["age"],
+            "val_sdreg": val["sdreg"],
+        }
+        logs_rows.append(row)
+
+        # overwrite each epoch so logs survive crashes/early stop
+        pd.DataFrame(logs_rows).to_feather(logs_path)
+
 
         if val["total"] < best:
             best, bad = val["total"], 0
@@ -626,6 +687,7 @@ if __name__ == "__main__":
     ap.add_argument("input_path")
     ap.add_argument("train_split_path")
     ap.add_argument("val_split_path")
+    ap.add_argument("logs_path")
     ap.add_argument("covariate_str")
 
     ap.add_argument("--latent_dim", type=int, default=5)
@@ -683,6 +745,7 @@ if __name__ == "__main__":
         args.input_path,
         args.train_split_path,
         args.val_split_path,
+        args.logs_path,  
         covariate_cols,
         args.latent_dim,
         args.max_epochs,
