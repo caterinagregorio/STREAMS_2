@@ -1,16 +1,22 @@
-#' DA  SISTEMARE TUTTE LE DIRECTORY E PARAMETRI DELLE FUNZIONI NESTED CHE VOGLIO LASCIARE MODIFICABILI
-#' Run STREAMS Pipeline
+#' Run STREAMS: Main function
 #'
 #' @description
-#' Executes the full STREAMS workflow:
+#' \code{run_streams()} runs the full STREAMS pipeline starting from longitudinal visit-level data:
 #' \enumerate{
-#'   \item Prepares longitudinal panel data for PU-learning and downstream modeling.
-#'   \item Calls Python scripts for training and inference. This phase exploits a Mean Teacher conditional
-#'   variational autoencoder generating a individual-level posterior distribution for disease onset and onset age.
-#'   \item Performs multiple imputation of complete trajectories.
-#'   \item Fits multi-state models on each imputed dataset.
-#'   \item Combine the parameter estimates using Rubin's rules.
+#'   \item Builds a patient-level dataset and PU-learning priors via \code{\link{prepare_data}}.
+#'   \item Trains a Conditional VAE (withMean-Teacher style training) via the packaged Python script
+#'         \code{train.py} (called through \code{\link{streams_python}}).
+#'   \item Runs model inference via \code{inference.py} to obtain individual-level predictions:
+#'         onset probability \eqn{p(\mathrm{onset})} and onset-age distribution parameters (e.g., mean and SD).
+#'   \item Generates \code{m} imputed complete trajectories by sampling onset status and onset age.
+#'   \item Fits \code{m} parametric illness-death multi-state models via \code{\link{fit_model}}.
+#'   \item Aggregates parameters across imputations via \code{\link{averaging_params}}.
 #' }
+#'
+#' @details
+#' The pipeline exchanges data between R and Python using Feather files
+#' and stores a trained model checkpoint. See the “Side effects” section below.
+#'
 #' @param data A `data.table` or `data.frame` that must contain the following columns:
 #'   - `patient_id`: Unique identifier for each patient (numeric).
 #'   - `dead`: Binary indicator (0/1) for whether the patient is dead.
@@ -19,31 +25,121 @@
 #'   - `onset_age`: Age at disease onset if it has occurred or `death_time` otherwise (numeric).
 #'   - `age`: Patient's current age at that specific visit (numeric).
 #'   - `visits`: Indicator of the current visit (numeric).
-#' @param cov_vector Character vector of covariate names for modeling.
-#' @param lab_prop Proportion for PU-learning thresholding. Default = 0.5.
-#' @param train_args Named list of additional CLI arguments for training script.
-#' @param infer_args Named list of additional CLI arguments for inference script.
-#' @param m Number of imputations for onset age sampling (default = 20).
-#' @param clock_assumption Clock assumption for multi-state modeling (`"forward"` or `"mix"`).
-#' @param distribution Distribution for parametric survival models (e.g., `"gompertz"`).
-#' @param n_cores Number of cores for parallel fitting (default = 4).
-#' @param python Character. Python executable (default "python3").
+#'   The `data.frame` can contain extra columns with covariate values.
 #'
-#' @return A matrix of averaged parameter estimates across imputations.
+#' @param cov_vector Character vector of covariate names to be used in modeling.
+#'   These are automatically scaled/encoded in the process.
+#' @param m Integer. Number of fitted multi-state models that will contribute to the pooled estimates.
+#' @param clock_assumption Character. Time-scale assumption for the multi-state model. Passed to
+#'   \code{\link{fit_model}}. Accepted values are \code{"forward"} to fit a Markov process or \code{"mix"} for a Semi-Markov process.
+#' @param distribution A character string specifying the parametric form of baseline hazards.
+#'   Must be one of the distributions available in `flexsurv::flexsurvreg`, e.g., `"weibull"`, `"exponential"`, `"gompertz"`.
+#' @param custom_formula Optional \code{survival::Surv()} formula used for all transitions in the multi-state fit.
+#'   If \code{NULL}, formulas are built automatically from \code{cov_vector} (assuming linear effects).
+#' @param lab_prop Numeric in (0, 1). Controls the PU-learning thresholding used to derive soft labels for training:
+#'   among patients with \code{onset == 0}, those below the \code{lab_prop}-quantile of PU risk scores are treated
+#'   as reliable negatives (\code{onset_soft = 0}); remaining \code{onset == 0} are left unlabeled.
+#'
+#' @param pu_args Named list of PU-learning hyperparameters overriding \code{.default_pu_args} and forwarded to
+#'   the PU-learning routine. Supported keys:
+#'   \describe{
+#'     \item{max_iter}{Maximum number of EM iterations for PU learning.}
+#'     \item{tol}{Convergence tolerance on successive log-likelihood differences.}
+#'     \item{clip}{Probability clipping threshold for numerical stability.}
+#'     \item{damp}{Damping factor in (0,1) for updating PU components to reduce oscillations.}
+#'     \item{shrink_k}{Non-negative shrinkage parameter to penalize regions with low labeling propensity.}
+#'     \item{verbose}{Logical. If \code{TRUE}, prints PU-learning training diagnostics.}
+#'   }
+#'
+#' @param cvae_args Named list of training hyperparameters overriding \code{.default_cvae_args}.
+#'   These entries are converted to command-line flags and passed to the Python training script \code{train.py}.
+#'   Common keys in STREAMS are:
+#'   \describe{
+#'     \item{latent_dim}{Latent dimension of the CVAE.}
+#'     \item{max_epochs}{Maximum number of training epochs.}
+#'     \item{batch_size}{Mini-batch size.}
+#'     \item{lr}{Learning rate.}
+#'     \item{K_aug}{Number of independent prior augmentations evaluated by the \emph{teacher} per unlabeled
+#'     input to estimate a mean teacher score \eqn{\bar p_i} and its variance \eqn{v_i}. Increasing \code{K_aug}
+#'     yields a more stable uncertainty estimate but increases compute.}
+#'     \item{r_all}{Numeric in \eqn{[0,1]}. Global \emph{selection rate} in the proportion-based pseudo-labeling mode
+#'     (default). Among unlabeled items that pass the uncertainty gate, the trainer targets pseudo-labeling
+#'     approximately an \code{r_all} fraction per batch by setting adaptive thresholds on teacher mean scores \eqn{\bar p_i}.}
+#'     \item{lambda_fix_max}{ Maximum weight of the FixMatch-style consistency term. The effective weight is ramped up with epoch
+#'     and capped at \code{lambda_fix_max}, so the student first stabilizes on labeled losses before trusting
+#'     teacher pseudo-labels.}
+#'     \item{fix_ramp_epochs}{Number of epochs used for the monotone ramp-up schedule.}
+#'     \item{prior_aug}{Character. Type of prior augmentation used to create stochastic, distribution-matched views
+#'     for student and teacher (\code{"beta"}, \code{"gauss} or \code{dropout}). The same augmentation family is used for both networks,
+#'     but sampled independently to generate noisy yet matched inputs for consistency.}
+#'     \item{early_stop_patience}{Early-stopping patience (number of epochs without improvement).}
+#'     \item{early_stop_warmup}{Number of warm-up epochs before early stopping is enabled.}
+#'   }
+#'   Any additional entries are forwarded as \code{--key value} flags; logical \code{TRUE} entries are forwarded
+#'   as \code{--key}.
+#'
+#' @param infer_args Named list of inference hyperparameters overriding \code{.default_infer_args}.
+#'   These entries are converted to command-line flags and passed to the Python inference script \code{inference.py}.
+#'   Common keys in STREAMS are:
+#'   \describe{
+#'     \item{latent_dim}{Latent dimension used at inference (should match the trained model).}
+#'     \item{mc_samples}{Number of Monte Carlo samples for stochastic inference.}
+#'     \item{batch_size}{Mini-batch size used at inference.}
+#'   }
+#'
+#' @param python Character. Path to the Python executable used to run \code{train.py} and \code{inference.py}.
+#'   Defaults to \code{Sys.which("python")}; if empty/NULL, a fallback such as \code{"python3"} may be used.
+#' @param out_dir Character. Directory used to store intermediate artifacts (Feather inputs/outputs, logs, model checkpoint).
+#'   If \code{NULL}, a unique timestamped subdirectory under \code{tempdir()} is created.
+#' @param keep_intermediate Logical. If \code{TRUE}, \code{out_dir} is kept after the run; if \code{FALSE}, \code{out_dir}
+#'   is deleted at the end.
+#' @param n_cores Integer. Number of cores used to fit the \code{m} multi-state models in parallel
+#'   via \code{parallel::mclapply}. (Note: \code{mclapply} is not supported on Windows.)
+#' @param seed Integer. For full end-to-end reproducibility.
+#'
+#' @return Aggregated parameter estimates across \code{m} imputed multi-state fits, as returned by
+#'   \code{\link{averaging_params}} (typically a numeric matrix: transitions × parameters).
+#'
+#' @seealso \code{\link{prepare_data}}, \code{\link{pu_learning}}, \code{\link{streams_python}},
+#'   \code{\link{fit_model}}}
 #'
 #' @examples
 #' \dontrun{
-#' est_params <- run_streams(
+#' est <- run_streams(
 #'   data = df_panel,
 #'   cov_vector = c("sex", "bmi", "smoking"),
-#'   version_name = "v1",
-#'   train_py = "py/training.py",
-#'   infer_py = "py/inference.py"
+#'   m = 20,
+#'   clock_assumption = "forward",
+#'   distribution = "gompertz",
+#'   lab_prop = 0.15,
+#'   pu_args = list(max_iter = 1000, tol = 1e-5),
+#'   cvae_args = list(max_epochs = 200, latent_dim = 5, prior_aug = "beta"),
+#'   out_dir = NULL,
+#'   keep_intermediate = TRUE,
+#'   n_cores = 4,
+#'   seed = 42
 #' )
 #' }
-#' @importFrom arrow read_feather
+#'
 #' @export
 
+run_streams <- function(
+    data,
+    cov_vector,
+    m = 20,
+    clock_assumption = "forward",
+    distribution = "gompertz",
+    custom_formula = NULL,
+    lab_prop = 0.15,
+    pu_args = list(),
+    cvae_args = list(),
+    infer_args = list(),
+    python = Sys.which("python"),
+    out_dir = tempdir(),
+    keep_intermediate = FALSE,
+    n_cores = 1,
+    seed = 42
+)
 
 .default_pu_args <- list(
   max_iter = 1000,
@@ -63,9 +159,7 @@
   lambda_fix_max = 1.0,
   fix_ramp_epochs = 50,
   K_aug = 5,
-  v_max = 1e-3,
   prior_aug = "beta",
-  prior_kappa = 30.0,
   early_stop_patience = 15,
   early_stop_warmup = 50
 )
@@ -73,8 +167,7 @@
 .default_infer_args <- list(
   latent_dim = 5,
   mc_samples = 5,
-  batch_size = 256,
-  use_student = FALSE
+  batch_size = 256
 )
 
 
@@ -89,21 +182,20 @@ run_streams <- function(
     custom_formula = NULL,
 
     # --- PU learning ---
-    lab_prop = 0.15,
+    lab_prop = 0.5,
     pu_args = list(),
 
     # --- CVAE / FixMatch (macro knobs) ---
     cvae_args = list(),
 
     # --- Inference ---
-    infer_mc_samples = 0,
     infer_args = list(),
 
     # --- Execution ---
     python = Sys.which("python"),
-    out_dir = tempdir(),
+    out_dir = NULL,
     keep_intermediate = FALSE,
-    n_cores = 1,
+    n_cores = 4,
     seed = 42
 )
 {
@@ -114,10 +206,6 @@ run_streams <- function(
   infer_cfg <- modifyList(.default_infer_args, infer_args)
 
   cvae_cfg$seed  <- seed
-
-  if (infer_mc_samples > 0) {
-    infer_cfg$mc_samples <- infer_mc_samples
-  }
 
 
   # --- helper: list -> vector args CLI
@@ -168,7 +256,10 @@ run_streams <- function(
   logs_path        <- file.path(dirs$results,  "logs.feather")
 
 
-  # --- clean data and prepare them for model
+  # --- check input data, clean data and prepare them for model
+
+  check_input_data(data)
+
   temp <- prepare_data(
     data = data,
     cov_vector = cov_vector,
@@ -220,6 +311,7 @@ run_streams <- function(
   )
 
   # --- Inverse sampling
+  set.seed(seed)
   c1 <- matrix(stats::runif(n_patients * m), nrow = n_patients, ncol = m)
   disease_status <- (dat$p_onset > c1) * 1
 
@@ -254,6 +346,92 @@ run_streams <- function(
   # --- average over imputed models
   est_params <- averaging_params(all_fits)
   #saveRDS(est_params, file = estimated_params)
+
+  #---------------------------
+  # Rubin pooling for flexsurv
+  #---------------------------
+
+  .pool_rubin <- function(Q, U_list) {
+    # Q: m x p matrix of estimates
+    # U_list: list length m of p x p covariance matrices
+    m <- nrow(Q)
+    Qbar <- colMeans(Q)
+
+    Ubar <- Reduce(`+`, U_list) / m
+    B <- stats::cov(Q)                 # sample covariance (div by m-1)
+    Tcov <- Ubar + (1 + 1/m) * B       # Rubin total variance
+
+    # Barnard-Rubin df per-parameter (optional but useful to store)
+    diagU <- diag(Ubar)
+    diagB <- diag(B)
+    denom <- (1 + 1/m) * diagB
+    df <- rep(Inf, length(Qbar))
+    ok <- denom > 0
+    df[ok] <- (m - 1) * (1 + diagU[ok] / denom[ok])^2
+
+    list(Qbar = Qbar, Ubar = Ubar, B = B, Tcov = Tcov, df = df, m = m)
+  }
+
+  pool_flexsurvreg_rubin <- function(fits, cl = 0.95) {
+    fits <- Filter(function(x) inherits(x, "flexsurvreg"), fits)
+    if (length(fits) < 2) stop("Need at least 2 successful flexsurvreg fits to pool.")
+
+    # Extract coef/vcov (both on real-line scale in flexsurv)
+    par_names <- names(stats::coef(fits[[1]]))
+    if (any(vapply(fits, function(f) !identical(names(stats::coef(f)), par_names), logical(1)))) {
+      stop("Parameter names/order differ across imputations. Ensure identical model specification.")
+    }
+
+    Q <- do.call(rbind, lapply(fits, function(f) stats::coef(f)))
+    U_list <- lapply(fits, function(f) stats::vcov(f))
+
+    rub <- .pool_rubin(Q, U_list)
+
+    # Use first fit as a template and overwrite the key fields used downstream
+    pooled <- fits[[1]]
+    pooled$coefficients <- rub$Qbar
+    pooled$cov <- rub$Tcov
+
+    # Store Rubin diagnostics (so you can report SE/CI exactly how you want)
+    attr(pooled, "rubin") <- rub
+    class(pooled) <- unique(c("flexsurvreg_pooled", class(pooled)))
+
+    pooled
+  }
+
+  pool_flexsurv_any_rubin <- function(all_fits, cl = 0.95) {
+    # all_fits is your length-m list; each element is either:
+    #  (a) a flexsurvreg, or
+    #  (b) a list of flexsurvreg (multi-state: one per transition)
+    ok <- which(vapply(all_fits, function(x) !is.null(x), logical(1)))
+    if (!length(ok)) stop("No successful fits found.")
+    template <- all_fits[[ok[1]]]
+
+    if (inherits(template, "flexsurvreg")) {
+      return(pool_flexsurvreg_rubin(all_fits, cl = cl))
+    }
+
+    if (is.list(template) && all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
+      # pool per component/transition
+      K <- length(template)
+      pooled_list <- vector("list", K)
+      for (k in seq_len(K)) {
+        kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
+        pooled_list[[k]] <- pool_flexsurvreg_rubin(kth_fits, cl = cl)
+      }
+      names(pooled_list) <- names(template)
+
+      # try to preserve attributes/class from template (e.g., fmsm might store trans)
+      at <- attributes(template)
+      at$names <- names(pooled_list)
+      attributes(pooled_list) <- at
+      return(pooled_list)
+    }
+
+    stop("Unsupported fit structure: expected flexsurvreg or list-of-flexsurvreg per imputation.")
+  }
+  pooled_fit <- pool_flexsurv_any_rubin(all_fits, cl = 0.95)
+
 
 
   return(est_params)
