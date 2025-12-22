@@ -41,10 +41,12 @@ lapply(fit_streams, function(x) summary(x, coefs = TRUE))
 trans1_streams <- fit_streams[[1]]
 class(trans1_streams)
 print(trans1_streams)
-summary(trans1_streams, coefs = TRUE) # al momento è uguale al print ma si puo arricchire
+summary(trans1_streams, coefs = TRUE) # al momento è uguale al print ma si puo arricchire (distribuzione, formula, cov usate..)
 confint(trans1_streams)
 attr(trans1_streams, "rubin")
 
+streams_coefs <- lapply(fit_streams, stats::coef)
+names(streams_coefs) <- c("0->1", "0->2", "1->2")
 
 
 # COMPARING WITH MSM
@@ -116,14 +118,215 @@ msm_main <- function(df, cov_vector) {
 
 cov_vector <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia", "educ_el", "ALCO_CONSUMP", "R_SMOKE", "ws0", "drugs0",
                 "dm_sex", "life_alone", "sei_long_cat", "fin_strain_early")
+coerce_covs_for_msm <- function(panel_data, cov_vector,
+                                keep_numeric = c("bmi0", "drugs0", "ws0"),
+                                ref_level = NULL) {
+  df <- panel_data
+
+  cov_vector <- intersect(cov_vector, names(df))
+  keep_numeric <- intersect(keep_numeric, cov_vector)
+  to_factor <- setdiff(cov_vector, keep_numeric)
+
+  # convert selected covariates to factor
+  for (v in to_factor) {
+    # keep NAs; coerce characters/numerics to factor
+    df[[v]] <- as.factor(df[[v]])
+
+    # optionally enforce a reference level
+    # ref_level can be:
+    # - NULL (do nothing)
+    # - a named list: list(ALCO_CONSUMP = "1", R_SMOKE = "1", Diabetes = "0", ...)
+    if (!is.null(ref_level) && !is.null(ref_level[[v]])) {
+      r <- as.character(ref_level[[v]])
+      lev <- levels(df[[v]])
+      if (r %in% lev) {
+        df[[v]] <- stats::relevel(df[[v]], ref = r)
+      } else {
+        warning(sprintf("ref_level '%s' not found in levels(%s): %s",
+                        r, v, paste(lev, collapse = ", ")))
+      }
+    }
+  }
+
+  # ensure numeric ones are numeric
+  for (v in keep_numeric) {
+    df[[v]] <- as.numeric(df[[v]])
+  }
+
+  df
+}
+ref_levels <- list(
+  Diabetes = "1",
+  Hypertension = "1",
+  Dyslipidemia = "1",
+  educ_el = "0",
+  ALCO_CONSUMP = "2",
+  R_SMOKE = "2",
+  dm_sex = "1",
+  life_alone = "1",
+  sei_long_cat = "1",
+  fin_strain_early = "1"
+)
+
+panel_data_msm <- coerce_covs_for_msm(
+  panel_data,
+  cov_vector = cov_vector,
+  keep_numeric = c("bmi0", "drugs0", "ws0"),
+  ref_level = ref_levels
+)
 
 t0 <- Sys.time()
-fits_msm <-   msm_main(panel_data, cov_vector)
+fits_msm <-   msm_main(panel_data_msm, cov_vector)
 t1 <- Sys.time()
 time_msm <- as.numeric(difftime(t1, t0, units = "secs") )
 
+msm_coefs <- lapply(seq_len(nrow(fits_msm$params)), function(i) {
+  v <- as.numeric(fits_msm$params[i, ])
+  names(v) <- colnames(fits_msm$params)
+  v
+})
+names(msm_coefs) <- rownames(fits_msm$params)
 
 
+
+compare_transition_coefs <- function(coefs_A, coefs_B,
+                                     label_A = "A",
+                                     label_B = "B",
+                                     only_common = TRUE,
+                                     transitions = NULL,
+                                     plot = TRUE) {
+
+  as_list_of_named_vecs <- function(x) {
+    if (is.null(x)) stop("Input is NULL.")
+
+    # single named vector -> one transition
+    if (is.numeric(x) && !is.matrix(x) && !is.data.frame(x)) {
+      if (is.null(names(x))) stop("Named vector required (names are coefficient terms).")
+      return(list(model = x))
+    }
+
+    # matrix/data.frame: rows=transitions, cols=terms
+    if (is.matrix(x) || is.data.frame(x)) {
+      x <- as.matrix(x)
+      if (is.null(rownames(x))) rownames(x) <- paste0("trans", seq_len(nrow(x)))
+      if (is.null(colnames(x))) stop("Matrix/data.frame must have colnames (terms).")
+
+      out <- lapply(seq_len(nrow(x)), function(i) {
+        v <- as.numeric(x[i, ])
+        names(v) <- colnames(x)
+        v
+      })
+      names(out) <- rownames(x)
+      return(out)
+    }
+
+    # list: each element a named numeric vector
+    if (is.list(x)) {
+      if (is.null(names(x))) names(x) <- paste0("trans", seq_along(x))
+      ok <- vapply(x, function(v) is.numeric(v) && !is.null(names(v)), logical(1))
+      if (!all(ok)) stop("List elements must be named numeric vectors (names are terms).")
+      return(x)
+    }
+
+    stop("Unsupported type for coefficients. Use list, matrix/data.frame, or named numeric vector.")
+  }
+
+  A <- as_list_of_named_vecs(coefs_A)
+  B <- as_list_of_named_vecs(coefs_B)
+
+  # decide which transitions to compare
+  trans_all <- union(names(A), names(B))
+  if (!is.null(transitions)) trans_all <- intersect(trans_all, transitions)
+
+  make_long <- function(lst, method_label) {
+    do.call(rbind, lapply(names(lst), function(tr) {
+      v <- lst[[tr]]
+      data.frame(
+        transition = tr,
+        term = names(v),
+        estimate = as.numeric(v),
+        method = method_label,
+        stringsAsFactors = FALSE
+      )
+    }))
+  }
+
+  dA <- make_long(A, label_A)
+  dB <- make_long(B, label_B)
+
+  dA <- dA[dA$transition %in% trans_all, , drop = FALSE]
+  dB <- dB[dB$transition %in% trans_all, , drop = FALSE]
+
+  # keep only common terms per transition if requested
+  if (isTRUE(only_common)) {
+    keep_rows <- function(d1, d2) {
+      out <- lapply(trans_all, function(tr) {
+        t1 <- d1$term[d1$transition == tr]
+        t2 <- d2$term[d2$transition == tr]
+        common <- intersect(t1, t2)
+        common
+      })
+      names(out) <- trans_all
+      out
+    }
+    common_by_tr <- keep_rows(dA, dB)
+
+    dA <- do.call(rbind, lapply(trans_all, function(tr) {
+      dd <- dA[dA$transition == tr, , drop = FALSE]
+      dd[dd$term %in% common_by_tr[[tr]], , drop = FALSE]
+    }))
+    dB <- do.call(rbind, lapply(trans_all, function(tr) {
+      dd <- dB[dB$transition == tr, , drop = FALSE]
+      dd[dd$term %in% common_by_tr[[tr]], , drop = FALSE]
+    }))
+  }
+
+  long <- rbind(dA, dB)
+  long <- long[order(long$transition, long$term, long$method), , drop = FALSE]
+  rownames(long) <- NULL
+
+  # wide + difference (B - A)
+  wide <- reshape(long[, c("transition", "term", "method", "estimate")],
+                  idvar = c("transition", "term"),
+                  timevar = "method",
+                  direction = "wide")
+
+  colA <- paste0("estimate.", label_A)
+  colB <- paste0("estimate.", label_B)
+  wide$diff_B_minus_A <- if (colA %in% names(wide) && colB %in% names(wide)) {
+    wide[[colB]] - wide[[colA]]
+  } else {
+    NA_real_
+  }
+
+  p <- NULL
+  if (isTRUE(plot)) {
+    if (requireNamespace("ggplot2", quietly = TRUE)) {
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = estimate, y = term, shape = method)) +
+        ggplot2::geom_point(size = 2) +
+        ggplot2::facet_wrap(~ transition, scales = "free_y") +
+        ggplot2::labs(
+          x = "Coefficient",
+          y = NULL,
+          title = paste0("Coefficient comparison: ", label_A, " vs ", label_B)
+        ) +
+        ggplot2::theme_bw()
+    } else {
+      message("ggplot2 not installed; returning data only (no plot).")
+    }
+  }
+
+  list(long = long, wide = wide, plot = p)
+}
+
+cmp <- compare_transition_coefs(streams_coefs, msm_coefs,
+                                label_A = "STREAMS",
+                                label_B = "MSM",
+                                only_common = TRUE,
+                                plot = TRUE)
+
+cmp$wide
+cmp$plot
 
 ### NEXT STEPS
 # - functions to check the input dataframe and tips on how handle mising data   DONE
