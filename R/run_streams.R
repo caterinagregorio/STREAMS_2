@@ -70,7 +70,7 @@
 #'     teacher pseudo-labels.}
 #'     \item{fix_ramp_epochs}{Number of epochs used for the monotone ramp-up schedule.}
 #'     \item{prior_aug}{Character. Type of prior augmentation used to create stochastic, distribution-matched views
-#'     for student and teacher (\code{"beta"}, \code{"gauss} or \code{dropout}). The same augmentation family is used for both networks,
+#'     for student and teacher (\code{"beta"}, \code{"gauss"} or \code{"dropout"}). The same augmentation family is used for both networks,
 #'     but sampled independently to generate noisy yet matched inputs for consistency.}
 #'     \item{early_stop_patience}{Early-stopping patience (number of epochs without improvement).}
 #'     \item{early_stop_warmup}{Number of warm-up epochs before early stopping is enabled.}
@@ -97,11 +97,15 @@
 #'   via \code{parallel::mclapply}. (Note: \code{mclapply} is not supported on Windows.)
 #' @param seed Integer. For full end-to-end reproducibility.
 #'
-#' @return Aggregated parameter estimates across \code{m} imputed multi-state fits, as returned by
-#'   \code{\link{averaging_params}} (typically a numeric matrix: transitions × parameters).
+#' @return
+#' A Rubin-pooled parametric multi-state model fit based on \code{m} imputations.
+#'
+#' Pooled estimates and uncertainty are available through \code{coef()}, \code{vcov()},
+#' \code{confint()}, and \code{summary(x, coefs = TRUE)}.
+
 #'
 #' @seealso \code{\link{prepare_data}}, \code{\link{pu_learning}}, \code{\link{streams_python}},
-#'   \code{\link{fit_model}}}
+#'   \code{\link{fit_model}}
 #'
 #' @examples
 #' \dontrun{
@@ -121,54 +125,8 @@
 #' )
 #' }
 #'
+#' @importFrom utils modifyList
 #' @export
-
-run_streams <- function(
-    data,
-    cov_vector,
-    m = 20,
-    clock_assumption = "forward",
-    distribution = "gompertz",
-    custom_formula = NULL,
-    lab_prop = 0.15,
-    pu_args = list(),
-    cvae_args = list(),
-    infer_args = list(),
-    python = Sys.which("python"),
-    out_dir = tempdir(),
-    keep_intermediate = FALSE,
-    n_cores = 1,
-    seed = 42
-)
-
-.default_pu_args <- list(
-  max_iter = 1000,
-  tol = 1e-5,
-  clip = 1e-3,
-  damp = 0.7,
-  shrink_k = 1.0,
-  verbose = FALSE
-)
-
-.default_cvae_args <- list(
-  latent_dim = 5,
-  max_epochs = 200,
-  batch_size = 256,
-  lr = 2e-3,
-  r_all = 0.3,
-  lambda_fix_max = 1.0,
-  fix_ramp_epochs = 50,
-  K_aug = 5,
-  prior_aug = "beta",
-  early_stop_patience = 15,
-  early_stop_warmup = 50
-)
-
-.default_infer_args <- list(
-  latent_dim = 5,
-  mc_samples = 5,
-  batch_size = 256
-)
 
 
 run_streams <- function(
@@ -317,11 +275,11 @@ run_streams <- function(
 
   disease_age <- matrix(0, nrow = n_patients, ncol = m)
   for (i in 1:n_patients) {
-    mu <- dat$age_mu[i]; sd <- dat$age_sd[i]; a <- dat$a[i]; b <- dat$b[i]
+    mu <- dat$age_mu[i]; sig <- dat$age_sd[i]; a <- dat$a[i]; b <- dat$b[i]
     b_safe <- pmin(pmax(b - 1e-3, a + 1e-3), b)
     disease_age[i, ] <- vapply(disease_status[i, ], function(o) {
       if (o == 1) {
-        sa <- sample_truncated_normal(mu, sd, a, b_safe)
+        sa <- sample_truncated_normal(mu, sig, a, b_safe)
         if (is.na(sa)) warning(sprintf("NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
                                        i, mu, sd, a, b, b_safe))
         sa
@@ -330,6 +288,11 @@ run_streams <- function(
   }
 
   # --- fit multi-state
+  if (.Platform$OS.type == "windows" && n_cores > 1) {
+    warning("mclapply is not supported on Windows; using n_cores = 1.")
+    n_cores <- 1
+  }
+
   all_fits <- parallel::mclapply(1:m, function(j) {
     temp <- cleaned_data
     idx <- which(disease_status[, j] == 1)
@@ -341,100 +304,13 @@ run_streams <- function(
 
   }, mc.cores = n_cores)
 
-  #save(all_fits, file = fits_rdata)
+  #-------------------------------------
+  # Pooling with Rubin's rules
+  #-------------------------------------
 
-  # --- average over imputed models
-  est_params <- averaging_params(all_fits)
-  #saveRDS(est_params, file = estimated_params)
+  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95)
 
-  #---------------------------
-  # Rubin pooling for flexsurv
-  #---------------------------
-
-  .pool_rubin <- function(Q, U_list) {
-    # Q: m x p matrix of estimates
-    # U_list: list length m of p x p covariance matrices
-    m <- nrow(Q)
-    Qbar <- colMeans(Q)
-
-    Ubar <- Reduce(`+`, U_list) / m
-    B <- stats::cov(Q)                 # sample covariance (div by m-1)
-    Tcov <- Ubar + (1 + 1/m) * B       # Rubin total variance
-
-    # Barnard-Rubin df per-parameter (optional but useful to store)
-    diagU <- diag(Ubar)
-    diagB <- diag(B)
-    denom <- (1 + 1/m) * diagB
-    df <- rep(Inf, length(Qbar))
-    ok <- denom > 0
-    df[ok] <- (m - 1) * (1 + diagU[ok] / denom[ok])^2
-
-    list(Qbar = Qbar, Ubar = Ubar, B = B, Tcov = Tcov, df = df, m = m)
-  }
-
-  pool_flexsurvreg_rubin <- function(fits, cl = 0.95) {
-    fits <- Filter(function(x) inherits(x, "flexsurvreg"), fits)
-    if (length(fits) < 2) stop("Need at least 2 successful flexsurvreg fits to pool.")
-
-    # Extract coef/vcov (both on real-line scale in flexsurv)
-    par_names <- names(stats::coef(fits[[1]]))
-    if (any(vapply(fits, function(f) !identical(names(stats::coef(f)), par_names), logical(1)))) {
-      stop("Parameter names/order differ across imputations. Ensure identical model specification.")
-    }
-
-    Q <- do.call(rbind, lapply(fits, function(f) stats::coef(f)))
-    U_list <- lapply(fits, function(f) stats::vcov(f))
-
-    rub <- .pool_rubin(Q, U_list)
-
-    # Use first fit as a template and overwrite the key fields used downstream
-    pooled <- fits[[1]]
-    pooled$coefficients <- rub$Qbar
-    pooled$cov <- rub$Tcov
-
-    # Store Rubin diagnostics (so you can report SE/CI exactly how you want)
-    attr(pooled, "rubin") <- rub
-    class(pooled) <- unique(c("flexsurvreg_pooled", class(pooled)))
-
-    pooled
-  }
-
-  pool_flexsurv_any_rubin <- function(all_fits, cl = 0.95) {
-    # all_fits is your length-m list; each element is either:
-    #  (a) a flexsurvreg, or
-    #  (b) a list of flexsurvreg (multi-state: one per transition)
-    ok <- which(vapply(all_fits, function(x) !is.null(x), logical(1)))
-    if (!length(ok)) stop("No successful fits found.")
-    template <- all_fits[[ok[1]]]
-
-    if (inherits(template, "flexsurvreg")) {
-      return(pool_flexsurvreg_rubin(all_fits, cl = cl))
-    }
-
-    if (is.list(template) && all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
-      # pool per component/transition
-      K <- length(template)
-      pooled_list <- vector("list", K)
-      for (k in seq_len(K)) {
-        kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
-        pooled_list[[k]] <- pool_flexsurvreg_rubin(kth_fits, cl = cl)
-      }
-      names(pooled_list) <- names(template)
-
-      # try to preserve attributes/class from template (e.g., fmsm might store trans)
-      at <- attributes(template)
-      at$names <- names(pooled_list)
-      attributes(pooled_list) <- at
-      return(pooled_list)
-    }
-
-    stop("Unsupported fit structure: expected flexsurvreg or list-of-flexsurvreg per imputation.")
-  }
-  pooled_fit <- pool_flexsurv_any_rubin(all_fits, cl = 0.95)
-
-
-
-  return(est_params)
+  return(pooled_fit)
 }
 
 

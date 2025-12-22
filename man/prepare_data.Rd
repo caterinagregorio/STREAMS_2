@@ -23,13 +23,19 @@ The \code{data.frame} can contain extra columns with covariate values.
 
 \item{lab_prop}{Numeric value (0–1) specifying the proportion of unlabeled patients to assign as negative in PU-learning thresholding.}
 
+\item{pu_args}{Named list of PU-learning hyperparameters forwarded to \code{\link{pu_learning}}.}
+
 \item{train_path}{File path where the processed training dataset will be saved in Feather format.}
 
 \item{infer_path}{File path where the processed inference dataset will be saved in Feather format.}
 }
 \value{
-A processed data frame with patient-level information that will be used for fitting the multi-state models.
-Processed datasets are saved to disk at \code{train_path} and \code{infer_path}.
+A list with:
+\describe{
+\item{A processed data frame with patient-level information that will be used for fitting the multi-state models.}
+\item{Character vector of covariate names after one-hot encoding.}
+}
+Processed training and inference datasets are saved to disk at \code{train_path} and \code{infer_path}.
 }
 \description{
 Processes longitudinal patient visit data to generate a patient-level dataset enriched with derived features,

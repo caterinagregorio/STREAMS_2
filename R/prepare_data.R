@@ -19,6 +19,8 @@
 #' @param lab_prop Numeric value (0–1) specifying the proportion of unlabeled patients to assign as negative in PU-learning thresholding.
 #' @param train_path File path where the processed training dataset will be saved in Feather format.
 #' @param infer_path File path where the processed inference dataset will be saved in Feather format.
+#' @param pu_args Named list of PU-learning hyperparameters forwarded to \code{\link{pu_learning}}.
+
 #'
 #' @details
 #' The function performs the following steps:
@@ -30,9 +32,14 @@
 #'   \item Output preparation: Creates training and inference datasets and saves them as Feather files.
 #' }
 #'
-#' @return A processed data frame with patient-level information that will be used for fitting the multi-state models.
-#' Processed datasets are saved to disk at \code{train_path} and \code{infer_path}.
+#' @return A list with:
+#'   \describe{
+#'     \item{A processed data frame with patient-level information that will be used for fitting the multi-state models.}
+#'     \item{Character vector of covariate names after one-hot encoding.}
+#'   }
 #'
+#'Processed training and inference datasets are saved to disk at \code{train_path} and \code{infer_path}.
+
 #' @examples
 #' \dontrun{
 #' prepare_data(
@@ -47,7 +54,7 @@
 #' @importFrom magrittr %>%
 #' @importFrom dplyr arrange group_by summarize left_join mutate select slice ungroup
 #' @importFrom dplyr if_else case_when row_number all_of desc first n
-#' @importFrom stats quantile
+#' @importFrom stats quantile na.omit sd
 #' @importFrom fastDummies dummy_cols
 #' @importFrom arrow write_feather
 #' @export
