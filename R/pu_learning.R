@@ -117,13 +117,16 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
 
   # -- build model matrices
   Xp <- model.matrix(reformulate(features_cl), df)
+  Xp_noage <- model.matrix(reformulate(features_cl[features_cl!="age"]), df)
   Xe <- model.matrix(reformulate(features_prop), data = df)
   Xp_n <- Xp[, -1, drop = FALSE]
+  Xp_noage_n <- Xp_noage[, -1, drop = FALSE]
   Xe_n <- Xe[, -1, drop = FALSE]
 
   # -- drop near-constant columns (prevents intercept-only fits)
   nzv <- function(M, thr = 1e-8) if (ncol(M)) M[, apply(M, 2, sd, na.rm = TRUE) > thr, drop = FALSE] else M
   Xp_n <- nzv(Xp_n)
+  Xp_noage_n <- nzv(Xp_noage_n)
   Xe_n <- nzv(Xe_n)
 
   S     <- as.numeric(df$onset)
@@ -134,6 +137,28 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
   fit_f <- stats::glm(S ~ Xp_n, family = stats::binomial()) #P(S=1 given Xp)=P(Y=1 given Xp)P(S=1 given Y=1,Xp)=p(x)e(x) under scar
   fhat  <- as.numeric(stats::predict(fit_f, type = "response"))
   fhat  <- pmin(pmax(fhat, clip), 1 - clip)
+
+  fit_f_noage <- stats::glm(S ~ Xp_noage_n, family = stats::binomial())
+  fhat_noage  <- as.numeric(stats::predict(fit_f_noage, type = "response"))
+  fhat_noage  <- pmin(pmax(fhat_noage, clip), 1 - clip)
+
+  roc_obj_init <- pROC::roc(response = S, predictor = fhat_noage, quiet = TRUE)
+  ci_auc_init  <- pROC::ci.auc(roc_obj_init, conf.level = 0.95, method = "bootstrap", boot.n = 500)
+  auc_lo_init  <- as.numeric(ci_auc_init[1]); auc_mid_init <- as.numeric(ci_auc_init[2]); auc_hi_init <- as.numeric(ci_auc_init[3])
+
+  message(sprintf("AUC init PU-learning=%.3f; 95%% CI=[%.3f, %.3f]", auc_mid_init, auc_lo_init, auc_hi_init))
+
+  #Adaptive strinkage based on AUC init
+  if (auc_lo_init < 0.65 & shrink_k==0) {
+    shrink_k <- max(shrink_k, 1.0)
+    message("Strong shrinkage imposed in PU-learning!")
+  } else if (auc_lo_init <= 0.65 && auc_hi_init >= 0.70 & shrink_k==0) {
+    shrink_k<- max(shrink_k, 0.5)
+    message("Moderate shrinkage imposed in PU-learning!")
+  } else if (auc_hi_init > 0.70 & shrink_k==0) {
+    shrink_k <- max(shrink_k, 0.1)  # micro-shrink "fail-safe"
+    message("Micro shrinkage imposed in PU-learning!")
+  }
 
   c_hat <- mean(fhat[S == 1], na.rm = TRUE); if (!is.finite(c_hat) || c_hat <= clip) c_hat <- 0.5  # labelling rate among true positive P(S=1 given Y=1)
   p <- pmin(pmax(fhat / c_hat, clip), 1 - clip) # P(Y=1∣Xp) inverted from above expression
