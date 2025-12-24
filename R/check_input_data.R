@@ -3,6 +3,7 @@
 #' This function validates that the input object is a `data.frame` / `data.table`
 #' with the required columns and reasonable values. It:
 #' - Checks that all required columns are present.
+#' - Optionally keeps only required columns + selected covariates (drops everything else).
 #' - Checks and (if possible) coerces column types.
 #' - Checks that binary variables are 0/1.
 #' - Warns about missing values and returns their locations as an attribute.
@@ -18,17 +19,19 @@
 #'   - `visits`: Indicator of the current visit (numeric).
 #'   The `data.frame` can contain extra columns with covariate values.
 #'
-#' @return Invisibly returns `data` (possibly coerced to `data.table`) with an
-#'   attribute `"na_index"` containing a `data.frame` with the locations of
-#'   missing values in required columns (columns: `row`, `col`). If no missing
-#'   values are present, the attribute is `NULL`.
+#' @param covariates Character vector of covariate names to keep in addition to
+#'   the required columns. Any other column will be dropped.
+#'
+#' @return Invisibly returns `data` (possibly coerced to `data.table`) restricted
+#'   to required columns + `covariates`, with an attribute `"na_index"` containing
+#'   a `data.frame` with the locations of missing values in the kept columns
+#'   (columns: `row`, `col`). If no missing values are present, the attribute is `NULL`.
 #'
 #' @importFrom utils head
 #' @importFrom data.table as.data.table is.data.table
 #' @export
+check_input_data <- function(data, covariates = character(0)) {
 
-
-check_input_data <- function(data) {
   # ---- basic class check ----
   if (!inherits(data, "data.frame")) {
     stop(
@@ -55,6 +58,26 @@ check_input_data <- function(data) {
     "visits"
   )
 
+  # ---- keep only required + covariates ----
+  covariates <- unique(as.character(covariates))
+  keep_cols  <- unique(c(required_cols, covariates))
+
+  # check presence
+  missing_cols <- setdiff(keep_cols, names(data))
+  if (length(missing_cols) > 0) {
+    stop(
+      "Input data is missing required columns / selected covariates: ",
+      paste(missing_cols, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  # subset columns (drop everything else)
+  if (requireNamespace("data.table", quietly = TRUE) && data.table::is.data.table(data)) {
+    data <- data[, ..keep_cols]
+  } else {
+    data <- data[, keep_cols, drop = FALSE]
+  }
 
   # ---- type checks & coercions ----
   # numeric-like columns
@@ -106,16 +129,13 @@ check_input_data <- function(data) {
 
   # ---- missing values ----
   na_mat <- is.na(data)
-
   if (any(na_mat)) {
-
     where_na <- which(na_mat, arr.ind = TRUE)
     na_index <- data.frame(
       row = where_na[, "row"],
       col = colnames(data)[where_na[, "col"]],
       stringsAsFactors = FALSE
     )
-
     attr(data, "na_index") <- na_index
 
     warning(
@@ -128,24 +148,18 @@ check_input_data <- function(data) {
       "To proceed you should either drop incomplete rows or impute missing values.",
       call. = FALSE
     )
-
   } else {
     attr(data, "na_index") <- NULL
   }
 
-
   # ---- basic consistency checks ----
-  # non-negative times/ages
   nonneg_cols <- c("death_time", "onset_age", "age")
   for (col in nonneg_cols) {
     x <- data[[col]]
     n_bad <- sum(x < 0, na.rm = TRUE)
     if (n_bad > 0L) {
       warning(
-        sprintf(
-          "Column '%s' contains %d negative values.",
-          col, n_bad
-        ),
+        sprintf("Column '%s' contains %d negative values.", col, n_bad),
         call. = FALSE
       )
     }
@@ -158,8 +172,7 @@ check_input_data <- function(data) {
       call. = FALSE
     )
   }
-  if (any(abs(data[["visits"]] - round(data[["visits"]])) > .Machine$double.eps^0.5,
-          na.rm = TRUE)) {
+  if (any(abs(data[["visits"]] - round(data[["visits"]])) > .Machine$double.eps^0.5, na.rm = TRUE)) {
     warning(
       "Column 'visits' contains non-integer values; expected integer visit indices.",
       call. = FALSE
@@ -188,7 +201,5 @@ check_input_data <- function(data) {
     )
   }
 
-
-    invisible(data)
-  }
-
+  invisible(data)
+}

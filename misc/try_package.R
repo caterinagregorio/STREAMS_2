@@ -4,9 +4,14 @@ library(devtools)
 panel_data <- panel_data %>%
   filter(!is.na(onset))
 
-cov_vector <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia", "educ_el", "ALCO_CONSUMP", "R_SMOKE", "ws0", "drugs0",
+cov_vector <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia", "educ_el", "ALCO_CONSUMP", "R_SMOKE",
                 "dm_sex", "life_alone", "sei_long_cat", "fin_strain_early")
 
+cov_vector <- list(
+  "0->1" = c("Dyslipidemia", "Diabetes", "Hypertension"),
+  "0->2" = c("ALCO_CONSUMP", "R_SMOKE", "dm_sex"),
+  "1->2" = c("educ_el", "dm_sex", "life_alone", "fin_strain_early")
+)
 #check_input_data(panel_data)
 
 impute_one <- function(x) {
@@ -22,8 +27,12 @@ impute_one <- function(x) {
   x
 }
 
+
+cov_names <- unique(unlist(cov_vector, use.names = FALSE))
+cov_names <- intersect(cov_names, names(panel_data))
 panel_data <- panel_data %>%
-  mutate(across(all_of(cov_vector), impute_one))
+  mutate(across(all_of(cov_names), impute_one))
+
 
 t0 <- Sys.time()
 fit_streams <- run_streams(
@@ -88,104 +97,121 @@ msm_main <- function(df, cov_vector) {
     error = function(e) NULL
   )
 
-  coln <- c("rate", cov_vector)
-  mat <- matrix(NA_real_, nrow = 3, ncol = length(coln),
-                dimnames = list(c("0->1", "0->2", "1->2"), coln))
-
-  if (is.null(fit)) {
-    return(list(model = NULL, params = mat))
-  }
-
-
-  v <- fit$estimates
-  vn <- names(v)
-
-  # baseline intensities for 3 transitions then cov effects per transition
-  needed <- 3 + 3 * length(cov_vector)
-  vv <- rep(NA_real_, needed)
-  vv[seq_len(min(length(v), needed))] <- v[seq_len(min(length(v), needed))]
-
-  mat[, "rate"] <- vv[1:3]
-  if (length(cov_vector) > 0) {
-    off <- 4
-    for (cv in cov_vector) {
-      mat[, cv] <- vv[off:(off + 2)]
-      off <- off + 3
-    }
-  }
-  list(model = fit, params = mat)
+  list(model = fit)
 }
 
 cov_vector <- c("bmi0", "Diabetes", "Hypertension", "Dyslipidemia", "educ_el", "ALCO_CONSUMP", "R_SMOKE", "ws0", "drugs0",
                 "dm_sex", "life_alone", "sei_long_cat", "fin_strain_early")
-coerce_covs_for_msm <- function(panel_data, cov_vector,
-                                keep_numeric = c("bmi0", "drugs0", "ws0"),
-                                ref_level = NULL) {
-  df <- panel_data
-
-  cov_vector <- intersect(cov_vector, names(df))
-  keep_numeric <- intersect(keep_numeric, cov_vector)
-  to_factor <- setdiff(cov_vector, keep_numeric)
-
-  # convert selected covariates to factor
-  for (v in to_factor) {
-    # keep NAs; coerce characters/numerics to factor
-    df[[v]] <- as.factor(df[[v]])
-
-    # optionally enforce a reference level
-    # ref_level can be:
-    # - NULL (do nothing)
-    # - a named list: list(ALCO_CONSUMP = "1", R_SMOKE = "1", Diabetes = "0", ...)
-    if (!is.null(ref_level) && !is.null(ref_level[[v]])) {
-      r <- as.character(ref_level[[v]])
-      lev <- levels(df[[v]])
-      if (r %in% lev) {
-        df[[v]] <- stats::relevel(df[[v]], ref = r)
-      } else {
-        warning(sprintf("ref_level '%s' not found in levels(%s): %s",
-                        r, v, paste(lev, collapse = ", ")))
-      }
-    }
-  }
-
-  # ensure numeric ones are numeric
-  for (v in keep_numeric) {
-    df[[v]] <- as.numeric(df[[v]])
-  }
-
-  df
-}
-ref_levels <- list(
-  Diabetes = "1",
-  Hypertension = "1",
-  Dyslipidemia = "1",
-  educ_el = "0",
-  ALCO_CONSUMP = "2",
-  R_SMOKE = "2",
-  dm_sex = "1",
-  life_alone = "1",
-  sei_long_cat = "1",
-  fin_strain_early = "1"
-)
-
-panel_data_msm <- coerce_covs_for_msm(
-  panel_data,
-  cov_vector = cov_vector,
-  keep_numeric = c("bmi0", "drugs0", "ws0"),
-  ref_level = ref_levels
-)
 
 t0 <- Sys.time()
-fits_msm <-   msm_main(panel_data_msm, cov_vector)
+fits_msm <-   msm_main(panel_data, cov_vector)
 t1 <- Sys.time()
 time_msm <- as.numeric(difftime(t1, t0, units = "secs") )
 
-msm_coefs <- lapply(seq_len(nrow(fits_msm$params)), function(i) {
-  v <- as.numeric(fits_msm$params[i, ])
-  names(v) <- colnames(fits_msm$params)
-  v
-})
-names(msm_coefs) <- rownames(fits_msm$params)
+msm_coefs_by_transition <- function(fit, include_rate = TRUE) {
+  qm <- fit$Qmatrices
+  if (is.null(qm$logbaseline)) stop("fit$Qmatrices$logbaseline not found.")
+
+  # transitions = off-diagonal non-NA in baseline
+  lb <- qm$logbaseline
+  rn <- rownames(lb); cn <- colnames(lb)
+  if (is.null(rn)) rn <- seq_len(nrow(lb))
+  if (is.null(cn)) cn <- seq_len(ncol(lb))
+
+  idx <- which(is.finite(lb) & row(lb) != col(lb), arr.ind = TRUE)
+
+  # covariate terms present in Qmatrices (dummy terms included)
+  cov_terms <- setdiff(names(qm), c("logbaseline", "baseline"))
+
+  out <- vector("list", nrow(idx))
+  for (k in seq_len(nrow(idx))) {
+    i <- idx[k, 1]; j <- idx[k, 2]
+    tr_name <- paste0(rn[i], "->", cn[j])
+
+    v <- numeric(0)
+
+    if (isTRUE(include_rate)) {
+      v <- c(v, rate = lb[i, j])  # log intensity baseline
+    }
+
+    for (ct in cov_terms) {
+      mat <- qm[[ct]]
+      if (!is.null(mat) && i <= nrow(mat) && j <= ncol(mat) && is.finite(mat[i, j])) {
+        v <- c(v, setNames(mat[i, j], ct))  # beta (log-HR) for that transition
+      }
+    }
+
+    out[[k]] <- v
+    names(out)[k] <- tr_name
+  }
+
+  out
+}
+
+msm_coefs <- msm_coefs_by_transition(fits_msm$model)
+
+trans_1 <- msm_coefs$`State 1->State 2`
+trans_2 <- msm_coefs$`State 1->State 3`
+trans_3 <- msm_coefs$`State 2->State 3`
+msm_coefs_filtered <- list(trans_1,trans_2,trans_3)
+names(msm_coefs_filtered) <- c("0->1", "0->2", "1->2")
+
+
+# COMPARING WITH FLEXSURV
+
+panel_collapsed <- panel_data %>%
+  group_by(patient_id) %>%
+  mutate(onset = as.integer(any(onset == 1))) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(-visits)
+
+fits_flexsurv <- fit_model(panel_collapsed, cov_vector, "forward", "gompertz")
+
+flexsurv_list_coefs <- function(fits, transition_names = NULL) {
+  # fits: list of flexsurvreg objects (one per transition)
+  fits <- Filter(function(x) inherits(x, "flexsurvreg"), fits)
+  if (!length(fits)) stop("No flexsurvreg objects found in `fits`.")
+
+  if (is.null(transition_names)) {
+    # default: 0->1, 0->2, 1->2 if length==3, else trans1..K
+    transition_names <- if (length(fits) == 3) c("0->1", "0->2", "1->2") else paste0("trans", seq_along(fits))
+  }
+  if (length(transition_names) != length(fits)) {
+    stop("Length of `transition_names` must match length of `fits`.")
+  }
+
+  out <- lapply(fits, stats::coef)
+  names(out) <- transition_names
+  out
+}
+flexsurv_list_coefs_table <- function(fits, transition_names = NULL) {
+  fits <- Filter(function(x) inherits(x, "flexsurvreg"), fits)
+  if (!length(fits)) stop("No flexsurvreg objects found in `fits`.")
+
+  if (is.null(transition_names)) {
+    transition_names <- if (length(fits) == 3) c("0->1", "0->2", "1->2") else paste0("trans", seq_along(fits))
+  }
+  if (length(transition_names) != length(fits)) {
+    stop("Length of `transition_names` must match length of `fits`.")
+  }
+
+  out <- lapply(fits, function(f) {
+    s <- summary(f)  #
+    if (!is.null(s$res)) {
+      tab <- as.data.frame(s$res)
+    } else if (!is.null(s$coefficients)) {
+      tab <- as.data.frame(s$coefficients)
+    } else {
+      stop("Couldn't find coefficients table in summary(flexsurvreg).")
+    }
+    tab
+  })
+  names(out) <- transition_names
+  out
+}
+flex_coefs <- flexsurv_list_coefs(fits_flexsurv, c("0->1","0->2","1->2"))
+
 
 
 
@@ -283,9 +309,11 @@ compare_transition_coefs <- function(coefs_A, coefs_B,
 
   long <- rbind(dA, dB)
   long <- long[order(long$transition, long$term, long$method), , drop = FALSE]
+  # avoid rate
+  long <- long[!long$term %in% "rate", , drop = FALSE]
   rownames(long) <- NULL
 
-  # wide + difference (B - A)
+
   wide <- reshape(long[, c("transition", "term", "method", "estimate")],
                   idvar = c("transition", "term"),
                   timevar = "method",
@@ -299,34 +327,72 @@ compare_transition_coefs <- function(coefs_A, coefs_B,
     NA_real_
   }
 
-  p <- NULL
-  if (isTRUE(plot)) {
-    if (requireNamespace("ggplot2", quietly = TRUE)) {
-      p <- ggplot2::ggplot(long, ggplot2::aes(x = estimate, y = term, shape = method)) +
-        ggplot2::geom_point(size = 2) +
-        ggplot2::facet_wrap(~ transition, scales = "free_y") +
-        ggplot2::labs(
-          x = "Coefficient",
-          y = NULL,
-          title = paste0("Coefficient comparison: ", label_A, " vs ", label_B)
-        ) +
-        ggplot2::theme_bw()
-    } else {
-      message("ggplot2 not installed; returning data only (no plot).")
-    }
-  }
-
-  list(long = long, wide = wide, plot = p)
+  list(long = long, wide = wide)
 }
 
-cmp <- compare_transition_coefs(streams_coefs, msm_coefs,
+cmp <- compare_transition_coefs(streams_coefs, msm_coefs_filtered,
                                 label_A = "STREAMS",
                                 label_B = "MSM",
                                 only_common = TRUE,
                                 plot = TRUE)
 
 cmp$wide
-cmp$plot
+
+
+cmp2<- compare_transition_coefs(streams_coefs, flex_coefs,
+                                label_A = "STREAMS",
+                                label_B = "FLEX",
+                                only_common = TRUE,
+                                plot = TRUE)
+
+cmp2$wide
+
+
+
+d1 <- cmp$wide %>%
+  select(transition, term, estimate.MSM, estimate.STREAMS) %>%
+  pivot_longer(
+    cols = starts_with("estimate"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    model = recode(model,
+                   "estimate.MSM" = "MSM",
+                   "estimate.STREAMS" = "STREAMS")
+  )
+
+d2 <- cmp2$wide %>%
+  select(transition, term, estimate.FLEX, estimate.STREAMS) %>%
+  pivot_longer(
+    cols = starts_with("estimate"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    model = recode(model,
+                   "estimate.FLEX" = "FLEX",
+                   "estimate.STREAMS" = "STREAMS")
+  )
+
+
+df_plot <- bind_rows(d1, d2)
+
+ggplot(df_plot,
+       aes(x = estimate, y = term, color = model)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_point(size = 2, position = position_dodge(width = 0.6)) +
+  facet_wrap(~ transition, scales = "free_y") +
+  labs(
+    x = "Estimate",
+    y = NULL,
+    color = "Model"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
 
 ### NEXT STEPS
 # - functions to check the input dataframe and tips on how handle mising data   DONE
@@ -338,13 +404,20 @@ cmp$plot
 # - store an example of dataset to run examples
 # - build the flexsurv object as output                                         DONE (to be checked)
 # - build summary function                                                      DONE (to be checked)
-# - test over snack dataset and compare with msm and flexsurv
+# - test over snack dataset and compare with msm and flexsurv                   DONE
 # - provide logs plots for debugging
 # - propagate seed
 # - Metadata: attr(pooled_fit,"streams") to set info like logs as objects attributes
 # - Set messages in main function to update user
-# - Disclaimer on output for user??
+# - Disclaimer on output class for user??
 # - Remove warnings() from pu_learning
+# - Different covariates for transitions                                        HIGH
+# - gestire caso spline con chiamata apposta
+# - inserire main function mipd
+# - cambiare voci res.t a NULL
+# - shrinkage                                                                   HIGH
+# - features_prop set by user                                                   HIGH
+# - controllare mcapply o settare per future
 
 
 

@@ -35,6 +35,7 @@ A list with:
 \item{A processed data frame with patient-level information that will be used for fitting the multi-state models.}
 \item{Character vector of covariate names after one-hot encoding.}
 }
+
 Processed training and inference datasets are saved to disk at \code{train_path} and \code{infer_path}.
 }
 \description{

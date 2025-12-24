@@ -27,8 +27,17 @@
 #'   - `visits`: Indicator of the current visit (numeric).
 #'   The `data.frame` can contain extra columns with covariate values.
 #'
-#' @param cov_vector Character vector of covariate names to be used in modeling.
-#'   These are automatically scaled/encoded in the process.
+#' @param cov_vector Either:
+#'   \itemize{
+#'     \item A character vector of covariate names to be used for all transitions; or
+#'     \item A named list of character vectors, one per transition, with names
+#'       \code{"0->1"}, \code{"0->2"}, and \code{"1->2"}, specifying
+#'       covariates for each transition separately.
+#'   }
+#'   In all cases, the union of covariates is passed to \code{prepare_data()},
+#'   and used as conditioning vector in the variational autoencoder
+#'   while \code{fit_model()} receives the per-transition specification.
+#'  These are automatically scaled/encoded in the process.
 #' @param m Integer. Number of fitted multi-state models that will contribute to the pooled estimates.
 #' @param clock_assumption Character. Time-scale assumption for the multi-state model. Passed to
 #'   \code{\link{fit_model}}. Accepted values are \code{"forward"} to fit a Markov process or \code{"mix"} for a Semi-Markov process.
@@ -165,6 +174,39 @@ run_streams <- function(
 
   cvae_cfg$seed  <- seed
 
+  # normalize covariate specification
+  normalize_cov_spec <- function(cov_spec) {
+    trans_names <- c("0->1", "0->2", "1->2")
+
+    if (is.character(cov_spec)) {
+      cov_list <- lapply(trans_names, function(x) cov_spec)
+      names(cov_list) <- trans_names
+      return(cov_list)
+    }
+
+    if (is.list(cov_spec)) {
+      if (is.null(names(cov_spec))) {
+        stop("If cov_vector is a list, it must be named with transitions '0->1', '0->2', '1->2'.")
+      }
+      cov_list <- vector("list", length(trans_names))
+      names(cov_list) <- trans_names
+
+      for (tr in trans_names) {
+        if (!is.null(cov_spec[[tr]])) {
+          cov_list[[tr]] <- as.character(cov_spec[[tr]])
+        } else {
+          cov_list[[tr]] <- character(0)
+        }
+      }
+      return(cov_list)
+    }
+
+    stop("cov_vector must be a character vector or a named list.")
+  }
+
+    cov_list  <- normalize_cov_spec(cov_vector)
+    cov_union <- sort(unique(unlist(cov_list)))
+
 
   # --- helper: list -> vector args CLI
   as_cli_args <- function(arg_list) {
@@ -216,11 +258,11 @@ run_streams <- function(
 
   # --- check input data, clean data and prepare them for model
 
-  check_input_data(data)
+  data <- check_input_data(data, cov_union)
 
   temp <- prepare_data(
     data = data,
-    cov_vector = cov_vector,
+    cov_vector = cov_union,
     lab_prop = lab_prop,
     pu_args = pu_cfg,
     train_path  = input_path_train,
@@ -300,7 +342,7 @@ run_streams <- function(
       temp$onset[idx]     <- 1
       temp$onset_age[idx] <- disease_age[idx, j]
     }
-    fit_model(temp, cov_vector, clock_assumption, distribution, custom_formula)
+    fit_model(temp, cov_list, clock_assumption, distribution, custom_formula)
 
   }, mc.cores = n_cores)
 
