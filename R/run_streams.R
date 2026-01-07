@@ -43,8 +43,13 @@
 #'   \code{\link{fit_model}}. Accepted values are \code{"forward"} to fit a Markov process or \code{"mix"} for a Semi-Markov process.
 #' @param distribution A character string specifying the parametric form of baseline hazards.
 #'   Must be one of the distributions available in `flexsurv::flexsurvreg`, e.g., `"weibull"`, `"exponential"`, `"gompertz"`.
-#' @param custom_formula Optional \code{survival::Surv()} formula used for all transitions in the multi-state fit.
-#'   If \code{NULL}, formulas are built automatically from \code{cov_vector} (assuming linear effects).
+#' @param custom_formula An optional specification of survival formulas:
+#'   \itemize{
+#'     \item If \code{NULL} (default), formulas are constructed automatically from
+#'           \code{cov_vector}, allowing different covariates per transition (assuming linear effects).
+#'     \item If a single \code{Surv()} formula, it is used for all transitions in the multi-state fit.
+#'     \item If a list of three \code{Surv()} formulas, each element is used for
+#'           the corresponding transition (1, 2, 3).
 #' @param lab_prop Numeric in (0, 1). Controls the PU-learning thresholding used to derive soft labels for training:
 #'   among patients with \code{onset == 0}, those below the \code{lab_prop}-quantile of PU risk scores are treated
 #'   as reliable negatives (\code{onset_soft = 0}); remaining \code{onset == 0} are left unlabeled.
