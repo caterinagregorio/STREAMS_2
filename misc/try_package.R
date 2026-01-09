@@ -1,5 +1,7 @@
 # ===================== Run over real data  ========================
 library(devtools)
+load_all()
+library(dplyr)
 #panel_data <- readRDS("panel_data.RDS")
 panel_data <- panel_data %>%
   filter(!is.na(onset))
@@ -44,7 +46,7 @@ fit_streams <- run_streams(
 t1 <- Sys.time()
 time_streams <- as.numeric(difftime(t1, t0, units = "secs"))
 
-lapply(fit_streams, function(x) summary(x, coefs = TRUE))
+lapply(fit_streams, function(x) summary(x, coefs = TRUE)) # da sistemare
 
 #trying all methods for my class flexsurvreg_pooled
 trans1_streams <- fit_streams[[1]]

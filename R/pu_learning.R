@@ -134,7 +134,7 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
   s_bar <- mean(S) #mean observed diseases
 
   # -- init: fhat = P(S=1 given Xp) via plain logistic, then SCAR start
-  fit_f <- stats::glm(S ~ Xp_n, family = stats::binomial()) #P(S=1 given Xp)=P(Y=1 given Xp)P(S=1 given Y=1,Xp)=p(x)e(x) under scar
+  fit_f <- suppressWarnings(stats::glm(S ~ Xp_n, family = stats::binomial())) #P(S=1 given Xp)=P(Y=1 given Xp)P(S=1 given Y=1,Xp)=p(x)e(x) under scar
   fhat  <- as.numeric(stats::predict(fit_f, type = "response"))
   fhat  <- pmin(pmax(fhat, clip), 1 - clip)
 
@@ -181,7 +181,7 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
 
     # ---- M-step p(x): fractional logistic
     #    r is a proportion; binomial GLM with weights=1 is fine
-    fit_p <- stats::glm(r ~ Xp_n, family = quasibinomial())
+    fit_p <- suppressWarnings(stats::glm(r ~ Xp_n, family = quasibinomial()))
     #fit_p <- stats::glm(r ~ Xp_n, family = stats::binomial(), weights = rep(1, n))
     p_new <- as.numeric(stats::predict(fit_p, type = "response"))
     p_new <- pmin(pmax(p_new, clip), 1 - clip)
@@ -190,7 +190,7 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
 
 
     w_e <- ifelse(S == 1, 1, r)
-    fit_e <- stats::glm(S ~ Xe_n, family = stats::binomial(), weights = w_e)
+    fit_e <- suppressWarnings(stats::glm(S ~ Xe_n, family = stats::binomial(), weights = w_e))
     e_new <- as.numeric(stats::predict(fit_e, type = "response"))
     e_new <- pmin(pmax(e_new, clip), 1 - clip)
 

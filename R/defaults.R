@@ -1,10 +1,10 @@
 #' @noRd
 .default_pu_args <- list(
   max_iter = 1000,
-  tol = 1e-5,
+  tol = 1e-3,
   clip = 1e-3,
-  damp = 0.7,
-  shrink_k = 1.0,
+  damp = 0.3,
+  shrink_k = 0.0,
   verbose = FALSE
 )
 #' @noRd
@@ -24,6 +24,6 @@
 #' @noRd
 .default_infer_args <- list(
   latent_dim = 5,
-  mc_samples = 5,
+  mc_samples = 0,
   batch_size = 256
 )
