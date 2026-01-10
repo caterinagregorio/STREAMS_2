@@ -180,12 +180,22 @@ prepare_data <- function(data, cov_vector, lab_prop, pu_args, train_path, infer_
     left_join(scores, by = "patient_id")
 
   # --- Step 5: Preprocessing for the following phase: one-hot encoding
-  scheme_data_encoded <- fastDummies::dummy_cols(
-    scheme_data_scaled,
-    select_columns = names(Filter(is.factor, scheme_data_scaled)),
-    remove_first_dummy = TRUE,   # avoids multicollinearity
-    remove_selected_columns = TRUE
-  )
+
+  factor_cols <- names(scheme_data_scaled)[
+    sapply(scheme_data_scaled, is.factor)
+  ]
+
+  scheme_data_encoded <- if (length(factor_cols) > 0) {
+    fastDummies::dummy_cols(
+      scheme_data_scaled,
+      select_columns = factor_cols,
+      remove_first_dummy = TRUE,   # avoids multicollinearity
+      remove_selected_columns = TRUE
+    )
+  } else {
+    scheme_data_scaled
+  }
+
   common_covs <- intersect(cov_vector, names(scheme_data_encoded))
 
   only_in_encoded <- setdiff(names(scheme_data_encoded), names(scheme_data_scaled))

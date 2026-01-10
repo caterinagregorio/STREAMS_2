@@ -8,46 +8,31 @@
 # Patch a COPY of the object so that flexsurv's summary/normboot
 #' @noRd
 .as_flexsurvreg_patched_for_summary <- function(object) {
-  x <- object
+
   rub <- .get_rubin(object)
 
+  x <- object
   qbar <- rub$Qbar
   tcov <- rub$Tcov
 
+  # overwrite pooled estimates
   x$coefficients <- qbar
 
-  # If there are fixed parameters, flexsurv stores cov only for optpars
-  opt <- x$optpars
-  if (!is.null(opt) && length(opt) > 0) {
-    x$cov <- tcov[opt, opt, drop = FALSE]
-    if (!is.null(x$opt) && !is.null(x$opt$par)) {
-      x$opt$par <- qbar[opt]
-    }
+  optpars <- x$optpars
+
+  # covariance: only optpars if some parameters are fixed
+  if (!is.null(optpars) && length(optpars) > 0) {
+    x$cov <- tcov[optpars, optpars, drop = FALSE]
   } else {
-    # common case: no fixed parameters
     x$cov <- tcov
-    if (!is.null(x$opt) && !is.null(x$opt$par)) {
-      x$opt$par <- qbar
-    }
   }
 
-  if (!is.null(x$res.t) && "est" %in% colnames(x$res.t)) {
-    # ensure rownames match names(qbar)
-    if (!is.null(names(qbar)) && !is.null(rownames(x$res.t))) {
-      if (all(names(qbar) %in% rownames(x$res.t))) {
-        x$res.t[names(qbar), "est"] <- qbar
-      } else if (nrow(x$res.t) == length(qbar)) {
-        x$res.t[, "est"] <- qbar
-        rownames(x$res.t) <- names(qbar)
-      }
-    } else if (nrow(x$res.t) == length(qbar)) {
-      x$res.t[, "est"] <- qbar
-    }
-  }
-
+  # remove pooled class so flexsurv summary dispatches correctly
   class(x) <- setdiff(class(x), "flexsurvreg_pooled")
+
   x
 }
+
 
 #------------------------------------------------------------
 # coef / vcov
@@ -70,29 +55,32 @@ vcov.flexsurvreg_pooled <- function(object, ...) {
 #' @noRd
 #' @exportS3Method stats::confint flexsurvreg_pooled
 confint.flexsurvreg_pooled <- function(object, parm = NULL, level = 0.95, ...) {
+
   rub <- .get_rubin(object)
+
   est <- rub$Qbar
   V   <- rub$Tcov
   se  <- sqrt(diag(V))
+  df  <- rub$df
+  names(df) <- names(est)
 
   if (!is.null(parm)) {
     est <- est[parm]
     se  <- se[parm]
-    df  <- rub$df[match(names(est), names(rub$Qbar))]
-  } else {
-    df <- rub$df
-    names(df) <- names(est)
+    df  <- df[parm]
   }
 
   alpha <- 1 - level
-  crit <- mapply(function(d) {
-    if (is.finite(d)) stats::qt(1 - alpha/2, df = d) else stats::qnorm(1 - alpha/2)
-  }, df)
+  crit <- vapply(df, function(d) {
+    if (is.finite(d)) stats::qt(1 - alpha/2, df = d)
+    else stats::qnorm(1 - alpha/2)
+  }, numeric(1))
 
-  lower <- est - crit * se
-  upper <- est + crit * se
+  out <- cbind(
+    lower = est - crit * se,
+    upper = est + crit * se
+  )
 
-  out <- cbind(lower = lower, upper = upper)
   attr(out, "level") <- level
   out
 }
@@ -136,18 +124,22 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
 #   using a patched copy centered at Rubin mean with Rubin covariance.
 #------------------------------------------------------------
 #' @noRd
-#' @exportS3Method base::print flexsurvreg_pooled
+#' @exportS3Method stats::summary flexsurvreg_pooled
 summary.flexsurvreg_pooled <- function(object, ..., coefs = FALSE, level = 0.95) {
+
+  rub <- .get_rubin(object)
+
   if (isTRUE(coefs)) {
-    rub <- .get_rubin(object)
+
     est <- rub$Qbar
     se  <- sqrt(diag(rub$Tcov))
     df  <- rub$df
 
     alpha <- 1 - level
-    crit <- mapply(function(d) {
-      if (is.finite(d)) stats::qt(1 - alpha/2, df = d) else stats::qnorm(1 - alpha/2)
-    }, df)
+    crit <- vapply(df, function(d) {
+      if (is.finite(d)) stats::qt(1 - alpha/2, df = d)
+      else stats::qnorm(1 - alpha/2)
+    }, numeric(1))
 
     tab <- data.frame(
       est = est,
@@ -159,28 +151,42 @@ summary.flexsurvreg_pooled <- function(object, ..., coefs = FALSE, level = 0.95)
     )
 
     out <- list(
-      call = object$call,
-      dist = object$dist,
-      m = rub$m,
-      table = tab,
-      rubin = rub,
-      level = level
+      call     = object$call,
+      table    = tab,
+      rubin    = rub,
+      metadata = object$metadata,
+      level    = level
     )
+
     class(out) <- "summary.flexsurvreg_pooled"
     return(out)
   }
 
-  # curves summary (survival/cumhaz/hazard/etc): use flexsurv's method
   patched <- .as_flexsurvreg_patched_for_summary(object)
-  getS3method("summary", "flexsurvreg")(patched, ...)
+  stats::summary(patched, ...)
 }
+
 
 #' @noRd
 #' @exportS3Method base::print summary.flexsurvreg_pooled
-print.summary.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3L), ...) {
+print.summary.flexsurvreg_pooled <- function(x,
+                                             digits = max(3L, getOption("digits") - 3L),
+                                             ...) {
+
   cat("Pooled flexsurvreg (Rubin's rules)\n")
-  if (!is.null(x$dist)) cat("Distribution:", x$dist, "\n")
-  if (!is.null(x$m))    cat("m imputations:", x$m, "\n\n")
+
+  if (!is.null(x$metadata$distribution))
+    cat("Distribution:", x$metadata$distribution, "\n")
+
+  if (!is.null(x$rubin$m))
+    cat("m imputations:", x$rubin$m, "\n\n")
+
   print(round(x$table, digits = digits))
+
+  cat("\nMetadata:\n")
+  for (nm in names(x$metadata)) {
+    cat(sprintf("  %-18s: %s\n", nm, deparse(x$metadata[[nm]])))
+  }
+
   invisible(x)
 }

@@ -20,58 +20,100 @@
   list(Qbar = Qbar, Ubar = Ubar, B = B, Tcov = Tcov, df = df, m = m)
 }
 
-pool_rubin_one_model <- function(fits, cl = 0.95) {
-  fits <- Filter(function(x) inherits(x, "flexsurvreg"), fits)
-  if (length(fits) < 2) stop("Need at least 2 successful fits to pool.")
+.strip_flexsurvreg <- function(obj, keep = c(
+  "call", "ncovs", "ncoveffs", "basepars", "covpars", "concat.formula",
+  "cov", "coefficients", "npars", "fixedpars", "optpars"
+)) {
+  for (nm in setdiff(names(obj), keep)) {
+    obj[[nm]] <- NULL
+  }
+  obj
+}
 
+.extract_metadata <- function(fit) {
+  list(
+    distribution     = distribution,
+    clock_assumption = clock_assumption,
+    cov_vector       = cov_vector,
+    custom_formula   = custom_formula
+  )
+}
+
+pool_rubin_one_model <- function(fits, cl = 0.95, metadata) {
+
+  fits <- Filter(function(f) inherits(f, "flexsurvreg"), fits)
+  if (length(fits) < 2)
+    stop("Need at least 2 successful fits to pool.")
 
   par_names <- names(stats::coef(fits[[1]]))
-  if (any(vapply(fits, function(f) !identical(names(stats::coef(f)), par_names), logical(1)))) {
-    stop("Parameter names/order differ across imputations. Ensure identical model specification.")
+  if (any(vapply(
+    fits,
+    function(f) !identical(names(stats::coef(f)), par_names),
+    logical(1)
+  ))) {
+    stop("Parameter names/order differ across imputations.")
   }
 
-  Q <- do.call(rbind, lapply(fits, function(f) stats::coef(f)))
-  U_list <- lapply(fits, function(f) stats::vcov(f))
+  Q <- do.call(rbind, lapply(fits, stats::coef))
+  U_list <- lapply(fits, stats::vcov)
 
   rub <- .pool_rubin(Q, U_list)
 
-  # Use first fit as a template and overwrite the key fields used downstream
-  pooled <- fits[[1]]
+  pooled <- .strip_flexsurvreg(fits[[1]])
   pooled$coefficients <- rub$Qbar
-  pooled$cov <- rub$Tcov
+  pooled$cov          <- rub$Tcov
 
-  # Store Rubin diagnostics
+  pooled$metadata <- metadata
+
   attr(pooled, "rubin") <- rub
   class(pooled) <- unique(c("flexsurvreg_pooled", class(pooled)))
 
   pooled
 }
 
-pool_rubin_all_transitions <- function(all_fits, cl = 0.95) {
+pool_rubin_all_transitions <- function(
+    all_fits, cl = 0.95,
+    distribution, clock_assumption, cov_vector, custom_formula
+) {
 
-  ok <- which(vapply(all_fits, function(x) !is.null(x), logical(1)))
+  metadata <- list(
+    distribution     = distribution,
+    clock_assumption = clock_assumption,
+    cov_vector       = cov_vector,
+    custom_formula   = custom_formula
+  )
+
+  ok <- which(vapply(all_fits, Negate(is.null), logical(1)))
   if (!length(ok)) stop("No successful fits found.")
+
   template <- all_fits[[ok[1]]]
 
   if (inherits(template, "flexsurvreg")) {
-    return(pool_rubin_one_model(all_fits, cl = cl))
+    return(pool_rubin_one_model(all_fits, cl = cl, metadata = metadata))
   }
 
-  if (is.list(template) && all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
+  if (is.list(template) &&
+      all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
+
     K <- length(template)
     pooled_list <- vector("list", K)
+
     for (k in seq_len(K)) {
-      kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
-      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl)
+      kth_fits <- lapply(all_fits, function(obj)
+        if (is.list(obj)) obj[[k]] else NULL
+      )
+
+      pooled_list[[k]] <- pool_rubin_one_model(
+        kth_fits,
+        cl = cl,
+        metadata = metadata
+      )
     }
+
     names(pooled_list) <- names(template)
-
-    # try to preserve attributes/class from template
-    at <- attributes(template)
-    at$names <- names(pooled_list)
-    attributes(pooled_list) <- at
-    return(pooled_list)
+    class(pooled_list) <- c("flexsurvreg_pooled_multistate", class(pooled_list))
+    pooled_list
+  } else {
+    stop("Unsupported fit structure.")
   }
-
-  stop("Unsupported fit structure: expected flexsurvreg or list-of-flexsurvreg per imputation.")
 }

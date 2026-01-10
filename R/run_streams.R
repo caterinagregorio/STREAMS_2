@@ -355,7 +355,7 @@ run_streams <- function(
   # Pooling with Rubin's rules
   #-------------------------------------
 
-  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95)
+  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95, distribution, clock_assumption, cov_vector, custom_formula)
 
   return(pooled_fit)
 }
