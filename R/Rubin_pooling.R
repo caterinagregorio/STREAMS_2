@@ -39,7 +39,7 @@
   )
 }
 
-pool_rubin_one_model <- function(fits, cl = 0.95, metadata) {
+pool_rubin_one_model <- function(fits, cl = 0.95) {
 
   fits <- Filter(function(f) inherits(f, "flexsurvreg"), fits)
   if (length(fits) < 2)
@@ -63,18 +63,20 @@ pool_rubin_one_model <- function(fits, cl = 0.95, metadata) {
   pooled$coefficients <- rub$Qbar
   pooled$cov          <- rub$Tcov
 
-  pooled$metadata <- metadata
-
   attr(pooled, "rubin") <- rub
-  class(pooled) <- unique(c("flexsurvreg_pooled", class(pooled)))
+  class(pooled) <- "flexsurvreg_pooled"
+
 
   pooled
 }
 
 pool_rubin_all_transitions <- function(
     all_fits, cl = 0.95,
-    distribution, clock_assumption, cov_vector, custom_formula
+    distribution, clock_assumption, cov_vector, custom_formula,
+    loss_plots = NULL,
+    logs_cols  = NULL
 ) {
+
 
   metadata <- list(
     distribution     = distribution,
@@ -83,37 +85,39 @@ pool_rubin_all_transitions <- function(
     custom_formula   = custom_formula
   )
 
+  # optional extras
+  if (!is.null(loss_plots)) metadata$loss_plots <- loss_plots
+  if (!is.null(logs_cols))  metadata$logs_cols  <- logs_cols
+
   ok <- which(vapply(all_fits, Negate(is.null), logical(1)))
   if (!length(ok)) stop("No successful fits found.")
-
   template <- all_fits[[ok[1]]]
 
+  # --- single-transition fit
   if (inherits(template, "flexsurvreg")) {
-    return(pool_rubin_one_model(all_fits, cl = cl, metadata = metadata))
+    pooled <- pool_rubin_one_model(all_fits, cl = cl)
+    attr(pooled, "metadata") <- metadata
+    return(pooled)
   }
 
-  if (is.list(template) &&
-      all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
+  # --- multi-state: list of flexsurvreg
+  if (is.list(template) && all(vapply(template, inherits, logical(1), "flexsurvreg"))) {
 
     K <- length(template)
     pooled_list <- vector("list", K)
 
     for (k in seq_len(K)) {
-      kth_fits <- lapply(all_fits, function(obj)
-        if (is.list(obj)) obj[[k]] else NULL
-      )
-
-      pooled_list[[k]] <- pool_rubin_one_model(
-        kth_fits,
-        cl = cl,
-        metadata = metadata
-      )
+      kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
+      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl)
     }
 
     names(pooled_list) <- names(template)
-    class(pooled_list) <- c("flexsurvreg_pooled_multistate", class(pooled_list))
-    pooled_list
-  } else {
-    stop("Unsupported fit structure.")
+    class(pooled_list) <- "flexsurvreg_pooled_multistate"
+
+    # attach ALL metadata (including loss_plots if present)
+    attr(pooled_list, "metadata") <- metadata
+    return(pooled_list)
   }
+
+  stop("Unsupported fit structure.")
 }

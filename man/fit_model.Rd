@@ -2,7 +2,7 @@
 % Please edit documentation in R/fit_model.R
 \name{fit_model}
 \alias{fit_model}
-\title{Fit Semi-Parametric Multi-State Models for a Progressive Illness-Death Process}
+\title{Fit Parametric Multi-State Models for a Progressive Illness-Death Process}
 \usage{
 fit_model(
   data,
@@ -22,28 +22,37 @@ It must include:
 \item \code{onset}: indicator of disease onset
 \item \code{dead}: indicator of death
 \item \code{age}: baseline age
-\item all covariates listed in \code{cov_vector}
+\item all covariates listed in \code{cov_vector} (or in its per-transition elements).
 }}
 
-\item{cov_vector}{A character vector of covariate names to be included
-in the model.}
+\item{cov_vector}{Either:
+\itemize{
+\item A character vector of covariate names to be included in the model for
+all three transitions;
+\item A list of three character vectors, one per transition, specifying
+covariates for each transition separately. List elements are named
+\code{"0->1"}, \code{"0->2"}, \code{"1->2"}.
+}}
 
 \item{clock_assumption}{A string specifying the time scale used for model fitting.
 Accepted values are:
 \itemize{
-\item \code{"forward"}: all transitions use the forward timescale \code{Surv(Tstart, Tstop, status)}
+\item \code{"forward"}: all transitions use the forward timescale \code{Surv(Tstart, Tstop, status)};
 \item \code{"mix"}: transitions 1 and 2 use forward time; transition 3 (disease → death)
-uses a reset timescale \code{Surv(time, status)}
+uses a reset timescale \code{Surv(time, status)}.
 }}
 
 \item{distribution}{A character string specifying the parametric distribution passed to
 \code{\link[flexsurv]{flexsurvreg}} (e.g., \code{"weibull"}, \code{"gompertz"}, \code{"lognormal"}).}
 
-\item{custom_formula}{An optional \code{Surv()} formula provided by the user.
-If supplied, it replaces the automatically generated formulas and will be used
-for \strong{all transitions}, regardless of the clock assumption.
-This allows specification of nonlinear or interaction effects.
-If \code{NULL} (default), the model formula is constructed automatically from \code{cov_vector}.}
+\item{custom_formula}{An optional specification of survival formulas:
+\itemize{
+\item If \code{NULL} (default), formulas are constructed automatically from
+\code{cov_vector}, allowing different covariates per transition.
+\item If a single \code{Surv()} formula, it is used for all transitions.
+\item If a list of three \code{Surv()} formulas, each element is used for
+the corresponding transition (1, 2, 3).
+}}
 }
 \value{
 A list of three fitted \code{flexsurvreg} model objects,
@@ -51,38 +60,17 @@ corresponding to each transition of the illness–death model.
 }
 \description{
 This function fits parametric models to the three transitions of a progressive
-illness–death model
-using the \pkg{mstate} and \pkg{flexsurv} frameworks.
-It supports both a \strong{forward timescale} (Markov process) and a \strong{mixed timescale} (Semi-Markov process)
-through the argument \code{clock_assumption}.
+illness–death model using the \pkg{mstate} and \pkg{flexsurv} frameworks.
+It supports both a \strong{forward timescale} (Markov process) and a \strong{mixed timescale}
+(Semi-Markov process) through the argument \code{clock_assumption}.
 }
 \details{
 The user may either:
 \itemize{
 \item provide a \strong{custom survival formula} (allowing splines, nonlinear effects, interactions, etc.),
-\item or rely on the \strong{default formula} constructed automatically from the covariates in \code{cov_vector} assuming linear effects.
+either as a single formula (applied to all transitions) or as a list of three formulas
+(one per transition);
+\item or rely on \strong{default formulas} constructed automatically from covariates,
+which may be specified globally or per transition.
 }
-}
-\examples{
-\dontrun{
-
-# Default model with linear covariate effects
-fit_model(
-  data = df,
-  cov_vector = c("sex", "bmi"),
-  clock_assumption = "forward",
-  distribution = "weibull"
-)
-
-# Custom formula with spline effect on BMI and reset of timescale in the disease status
-fit_model(
-  data = df,
-  cov_vector = c("sex", "bmi"),
-  clock_assumption = "mix",
-  distribution = "gompertz",
-  custom_formula = survival::Surv(time, status) ~
-      sex + splines::ns(bmi, df = 3)
-)
-}
-
 }

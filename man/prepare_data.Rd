@@ -2,55 +2,78 @@
 % Please edit documentation in R/prepare_data.R
 \name{prepare_data}
 \alias{prepare_data}
-\title{Prepare patient-level data for PU-learning and downstream modeling saving training and inference preprocessed data.}
+\title{Prepare patient-level data for PU-learning and downstream modeling (save training and inference data).}
 \usage{
-prepare_data(data, cov_vector, lab_prop, pu_args, train_path, infer_path)
+prepare_data(
+  data,
+  cov_vector,
+  lab_prop,
+  pu_args,
+  train_path,
+  infer_path,
+  features_prop_add = NULL
+)
 }
 \arguments{
-\item{data}{A \code{data.table} or \code{data.frame} that must contain the following columns:
+\item{data}{A \code{data.table} or \code{data.frame} with at least:
 \itemize{
-\item \code{patient_id}: Unique identifier for each patient (numeric).
-\item \code{dead}: Binary indicator (0/1) for whether the patient is dead.
-\item \code{death_time}: Time of death if it has occurred or censoring time otherwise (numeric).
-\item \code{onset}: Binary indicator (0/1) for disease onset.
-\item \code{onset_age}: Age at disease onset if it has occurred or \code{death_time} otherwise (numeric).
-\item \code{age}: Patient's current age at that specific visit (numeric).
-\item \code{visits}: Indicator of the current visit (numeric).
-The \code{data.frame} can contain extra columns with covariate values.
-}}
+\item \code{patient_id}: unique identifier per patient;
+\item \code{dead}: binary indicator (0/1) for death;
+\item \code{death_time}: time/age of death or censoring time;
+\item \code{onset}: binary indicator (0/1) for observed onset labeling \code{S};
+\item \code{onset_age}: age at disease onset if occurred, or \code{death_time} otherwise;
+\item \code{age}: age at each visit;
+\item \code{visits}: visit index/order (increasing within patient).
+}
+Extra covariate columns may be present.}
 
-\item{cov_vector}{Character vector of covariate names to include in modeling. These will be scaled and encoded as needed.}
+\item{cov_vector}{Character vector of baseline covariate names to include in downstream modeling.
+These will be scaled/encoded as needed and are also used as PU-learning classification features.}
 
-\item{lab_prop}{Numeric value (0–1) specifying the proportion of unlabeled patients to assign as negative in PU-learning thresholding.}
+\item{lab_prop}{Numeric in \eqn{(0,1)}. Proportion used to threshold unlabeled patients based on PU onset prior
+(higher \code{lab_prop} yields a stricter/rarer negative assignment among unlabeled).}
 
-\item{pu_args}{Named list of PU-learning hyperparameters forwarded to \code{\link{pu_learning}}.}
+\item{pu_args}{Named list of PU-learning hyperparameters forwarded to \code{\link{pu_learning}}.
+Any provided values override the defaults defined in \code{pu_learning}.}
 
-\item{train_path}{File path where the processed training dataset will be saved in Feather format.}
+\item{train_path}{File path where the processed training dataset will be saved (Feather).}
 
-\item{infer_path}{File path where the processed inference dataset will be saved in Feather format.}
+\item{infer_path}{File path where the processed inference dataset will be saved (Feather).}
+
+\item{features_prop_add}{Optional character vector of additional selection (propensity) features to append
+to the fixed default selection features used inside \code{\link{pu_learning}}.
+Use this only for covariates that plausibly affect the observation/labeling process.
+\strong{Warning:} adding variables overlapping with \code{cov_vector}
+can induce leakage/identifiability issues in SAR-PU and may destabilize EM updates.}
 }
 \value{
 A list with:
 \describe{
-\item{A processed data frame with patient-level information that will be used for fitting the multi-state models.}
-\item{Character vector of covariate names after one-hot encoding.}
+\item{\code{out_scheme}}{Processed patient-level data frame (for downstream multi-state fitting).}
+\item{\code{covariate_names_encoded}}{Character vector of covariate names after one-hot encoding.}
 }
-
-Processed training and inference datasets are saved to disk at \code{train_path} and \code{infer_path}.
 }
 \description{
 Processes longitudinal patient visit data to generate a patient-level dataset enriched with derived features,
-scaled covariates, and PU-learning scores under the SAR assumption. It also creates training and inference datasets
-with preprocessed data and saves them in Feather format for efficient downstream use.
+scaled covariates, and PU-learning onset priors under a Selected-At-Random (SAR) assumption. It creates training
+and inference datasets and saves them in Feather format for downstream use.
 }
 \details{
-The function performs the following steps:
+Pipeline:
 \enumerate{
-\item Feature engineering: Calculates hand crafted covariates.
-\item Scaling: Applies z-score normalization to numeric covariates.
-\item Encoding: Performs one-hot encoding of categorical variables.
-\item PU-learning: Estimates onset priors (\code{p_pos}) and assigns soft labels (\code{label_type}) based on \code{lab_prop}.
-\item Output preparation: Creates training and inference datasets and saves them as Feather files.
+\item Build patient-level table from visit-level data (onset indicator, last age before onset, etc.).
+\item Engineer follow-up/observation features for PU-learning:
+\code{length_followup}, \code{number_visits}, \code{visit_rate}, \code{interval}.
+\item Scale numeric covariates (z-score) and keep 0/1 variables unchanged.
+\item PU-learning under SAR:
+\itemize{
+\item Classification features \eqn{X_p}: \code{unique(c(cov_vector, "age"))}
+\item Selection features \eqn{X_e}: fixed defaults inside \code{pu_learning}
+(\code{length_followup}, \code{number_visits}) plus engineered additions
+(\code{interval}, \code{visit_rate}) and optional user \code{features_prop_add}.
+}
+\item Create soft labels \code{onset_soft} by thresholding unlabeled cases based on \code{lab_prop}.
+\item One-hot encode categorical variables; build training and inference datasets; save to Feather.
 }
 }
 \examples{
@@ -59,8 +82,10 @@ prepare_data(
   data = panel_data,
   cov_vector = c("sex", "bmi", "smoking_status"),
   lab_prop = 0.2,
+  pu_args = list(max_iter = 200),
   train_path = "output/train.feather",
-  infer_path = "output/infer.feather"
+  infer_path = "output/infer.feather",
+  features_prop_add = c("some_followup_proxy")
 )
 }
 

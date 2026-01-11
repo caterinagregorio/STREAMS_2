@@ -5,34 +5,6 @@
   rub
 }
 
-# Patch a COPY of the object so that flexsurv's summary/normboot
-#' @noRd
-.as_flexsurvreg_patched_for_summary <- function(object) {
-
-  rub <- .get_rubin(object)
-
-  x <- object
-  qbar <- rub$Qbar
-  tcov <- rub$Tcov
-
-  # overwrite pooled estimates
-  x$coefficients <- qbar
-
-  optpars <- x$optpars
-
-  # covariance: only optpars if some parameters are fixed
-  if (!is.null(optpars) && length(optpars) > 0) {
-    x$cov <- tcov[optpars, optpars, drop = FALSE]
-  } else {
-    x$cov <- tcov
-  }
-
-  # remove pooled class so flexsurv summary dispatches correctly
-  class(x) <- setdiff(class(x), "flexsurvreg_pooled")
-
-  x
-}
-
 
 #------------------------------------------------------------
 # coef / vcov
@@ -118,75 +90,99 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
 }
 
 #------------------------------------------------------------
-# summary:
-# - coefs=TRUE -> Rubin table (t-based CI)
-# - coefs=FALSE -> delegate to flexsurv::summary.flexsurvreg for curves,
-#   using a patched copy centered at Rubin mean with Rubin covariance.
+# summary flexsurvreg_pooled:
+# Rubin table (t-based CI)
 #------------------------------------------------------------
 #' @noRd
 #' @exportS3Method stats::summary flexsurvreg_pooled
-summary.flexsurvreg_pooled <- function(object, ..., coefs = FALSE, level = 0.95) {
+summary.flexsurvreg_pooled <- function(object, level = 0.95, ...) {
 
   rub <- .get_rubin(object)
 
-  if (isTRUE(coefs)) {
+  est <- rub$Qbar
+  se  <- sqrt(diag(rub$Tcov))
+  df  <- rub$df
 
-    est <- rub$Qbar
-    se  <- sqrt(diag(rub$Tcov))
-    df  <- rub$df
+  alpha <- 1 - level
+  crit <- vapply(df, function(d) {
+    if (is.finite(d)) stats::qt(1 - alpha/2, df = d)
+    else stats::qnorm(1 - alpha/2)
+  }, numeric(1))
 
-    alpha <- 1 - level
-    crit <- vapply(df, function(d) {
-      if (is.finite(d)) stats::qt(1 - alpha/2, df = d)
-      else stats::qnorm(1 - alpha/2)
-    }, numeric(1))
+  tab <- data.frame(
+    est = est,
+    se  = se,
+    df  = df,
+    LCL = est - crit * se,
+    UCL = est + crit * se,
+    row.names = names(est)
+  )
 
-    tab <- data.frame(
-      est = est,
-      se  = se,
-      df  = df,
-      LCL = est - crit * se,
-      UCL = est + crit * se,
-      row.names = names(est)
-    )
+  out <- list(
+    call  = object$call,
+    table = tab,
+    rubin = rub,
+    level = level
+  )
 
-    out <- list(
-      call     = object$call,
-      table    = tab,
-      rubin    = rub,
-      metadata = object$metadata,
-      level    = level
-    )
-
-    class(out) <- "summary.flexsurvreg_pooled"
-    return(out)
-  }
-
-  patched <- .as_flexsurvreg_patched_for_summary(object)
-  stats::summary(patched, ...)
+  class(out) <- "summary.flexsurvreg_pooled"
+  out
 }
 
-
+#------------------------------------------------------------
+# summary flexsurvreg_pooled_multistate:
+#------------------------------------------------------------
 #' @noRd
-#' @exportS3Method base::print summary.flexsurvreg_pooled
-print.summary.flexsurvreg_pooled <- function(x,
-                                             digits = max(3L, getOption("digits") - 3L),
-                                             ...) {
+#' @exportS3Method stats::summary flexsurvreg_pooled_multistate
+summary.flexsurvreg_pooled_multistate <- function(
+    object,
+    digits = max(3L, getOption("digits") - 3L),
+    plots_loss = FALSE,
+    plots = plots_loss,
+    ...
+) {
+  metadata <- attr(object, "metadata", exact = TRUE)
 
-  cat("Pooled flexsurvreg (Rubin's rules)\n")
-
-  if (!is.null(x$metadata$distribution))
-    cat("Distribution:", x$metadata$distribution, "\n")
-
-  if (!is.null(x$rubin$m))
-    cat("m imputations:", x$rubin$m, "\n\n")
-
-  print(round(x$table, digits = digits))
-
-  cat("\nMetadata:\n")
-  for (nm in names(x$metadata)) {
-    cat(sprintf("  %-18s: %s\n", nm, deparse(x$metadata[[nm]])))
+  m <- NULL
+  if (length(object) > 0) {
+    rub <- attr(object[[1]], "rubin", exact = TRUE)
+    if (!is.null(rub) && !is.null(rub$m)) m <- rub$m
   }
 
-  invisible(x)
+  cat("\nPooled multi-state model (flexsurv)\n")
+  cat(strrep("-", nchar("Pooled multi-state model (flexsurv)")), "\n", sep = "")
+  cat("Each transition is fitted as a `flexsurvreg_pooled` model; parameters are pooled using Rubin's rules.\n")
+  if (!is.null(m)) cat(sprintf("Imputations (m): %d\n", m))
+  cat(sprintf("Transitions: %d\n", length(object)))
+
+  # ---- metadata
+  if (!is.null(metadata) && length(metadata) > 0) {
+    cat("\nMetadata\n")
+    cat(strrep("-", nchar("Metadata")), "\n", sep = "")
+
+    # print everything except loss_plots
+    printed_any <- FALSE
+    for (nm in names(metadata)) {
+      if (nm == "loss_plots") next
+      printed_any <- TRUE
+      cat(sprintf("  %-20s: %s\n", nm, paste(deparse(metadata[[nm]]), collapse = " ")))
+    }
+    if (!printed_any) cat("  (no scalar metadata fields; only `loss_plots` stored)\n")
+  }
+
+  # ---- optional plots
+  show_plots <- isTRUE(plots_loss) || isTRUE(plots)
+  if (show_plots && !is.null(metadata) && !is.null(metadata$loss_plots)) {
+    cat("\nLoss diagnostics plots\n")
+    cat(strrep("-", nchar("Loss diagnostics plots")), "\n", sep = "")
+
+    lp <- metadata$loss_plots
+    if (!is.null(lp$raw$total)) print(lp$raw$total)
+    if (!is.null(lp$raw$aligned_plus_fixmatch)) print(lp$raw$aligned_plus_fixmatch)
+    if (!is.null(lp$weighted$total)) print(lp$weighted$total)
+    if (!is.null(lp$weighted$aligned_plus_fixmatch)) print(lp$weighted$aligned_plus_fixmatch)
+  }
+
+  cat("\n")
+  invisible(object)
 }

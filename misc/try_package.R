@@ -409,16 +409,16 @@ ggplot(df_plot,
 # - test over snack dataset and compare with msm and flexsurv                   DONE
 # - provide logs plots for debugging
 # - propagate seed
-# - Metadata: attr(pooled_fit,"streams") to set info like logs as objects attributes
+# - Metadata: attr(pooled_fit,"streams") to set info like logs as objects attributes DONE
 # - Set messages in main function to update user
 # - Disclaimer on output class for user??
 # - Remove warnings() from pu_learning
 # - Different covariates for transitions                                        DONE
 # - gestire caso spline con chiamata apposta
 # - inserire main function mipd
-# - cambiare voci res.t a NULL
+# - cambiare voci res.t a NULL                                                  DONE
 # - shrinkage                                                                   DONE
-# - features_prop set by user                                                   HIGH
+# - features_prop set by user                                                   DONE
 # - controllare mcapply o settare per future
 
 

@@ -47,6 +47,7 @@
 #'     \item If a single \code{Surv()} formula, it is used for all transitions.
 #'     \item If a list of three \code{Surv()} formulas, each element is used for
 #'           the corresponding transition (1, 2, 3).
+#'           }
 #' @return A list of three fitted \code{flexsurvreg} model objects,
 #'   corresponding to each transition of the illness–death model.
 #'

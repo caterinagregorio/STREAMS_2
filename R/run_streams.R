@@ -50,9 +50,15 @@
 #'     \item If a single \code{Surv()} formula, it is used for all transitions in the multi-state fit.
 #'     \item If a list of three \code{Surv()} formulas, each element is used for
 #'           the corresponding transition (1, 2, 3).
+#'           }
 #' @param lab_prop Numeric in (0, 1). Controls the PU-learning thresholding used to derive soft labels for training:
 #'   among patients with \code{onset == 0}, those below the \code{lab_prop}-quantile of PU risk scores are treated
 #'   as reliable negatives (\code{onset_soft = 0}); remaining \code{onset == 0} are left unlabeled.
+#' @param features_prop_add Optional character vector of additional selection (propensity) features to append
+#'   to the fixed default selection features used inside \code{\link{pu_learning}}.
+#'   Use this only for covariates that plausibly affect the observation/labeling process.
+#'   \strong{Warning:} adding variables overlapping with \code{cov_vector}
+#'   can induce leakage/identifiability issues in SAR-PU and may destabilize EM updates.
 #'
 #' @param pu_args Named list of PU-learning hyperparameters overriding \code{.default_pu_args} and forwarded to
 #'   the PU-learning routine. Supported keys:
@@ -156,6 +162,7 @@ run_streams <- function(
     # --- PU learning ---
     lab_prop = 0.5,
     pu_args = list(),
+    features_prop_add = NULL,
 
     # --- CVAE / FixMatch (macro knobs) ---
     cvae_args = list(),
@@ -271,7 +278,8 @@ run_streams <- function(
     lab_prop = lab_prop,
     pu_args = pu_cfg,
     train_path  = input_path_train,
-    infer_path = input_path_infer
+    infer_path = input_path_infer,
+    features_prop_add = features_prop_add
   )
   cleaned_data <- temp[[1]]
   cov_str <- paste(temp[[2]], collapse = ",")
@@ -304,6 +312,18 @@ run_streams <- function(
 
   # --- extract model predictions
   distributions <- arrow::read_feather(distributions_path)
+
+  # --- saving plot logs
+  if (file.exists(logs_path)) {
+    logs <- arrow::read_feather(logs_path)
+    logs_cols <- names(logs)
+
+    plots_raw <- plot_streams_total_and_fixmatch(logs, fixmatch_line = "raw", print_plots = FALSE)
+    plots_weighted <- plot_streams_total_and_fixmatch(logs, fixmatch_line = "weighted", print_plots = FALSE)
+
+    loss_plots <- list(raw = plots_raw, weighted = plots_weighted)
+  }
+
 
   # --- prepare imputation part (a,b)
   n_patients <- nrow(cleaned_data)
@@ -355,7 +375,8 @@ run_streams <- function(
   # Pooling with Rubin's rules
   #-------------------------------------
 
-  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95, distribution, clock_assumption, cov_vector, custom_formula)
+  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95, distribution, clock_assumption, cov_vector, custom_formula, loss_plots, logs_cols)
+
 
   return(pooled_fit)
 }

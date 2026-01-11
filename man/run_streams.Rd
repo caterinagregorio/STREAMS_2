@@ -13,6 +13,7 @@ run_streams(
   custom_formula = NULL,
   lab_prop = 0.5,
   pu_args = list(),
+  features_prop_add = NULL,
   cvae_args = list(),
   infer_args = list(),
   python = Sys.which("python"),
@@ -35,7 +36,16 @@ run_streams(
 The \code{data.frame} can contain extra columns with covariate values.
 }}
 
-\item{cov_vector}{Character vector of covariate names to be used in modeling.
+\item{cov_vector}{Either:
+\itemize{
+\item A character vector of covariate names to be used for all transitions; or
+\item A named list of character vectors, one per transition, with names
+\code{"0->1"}, \code{"0->2"}, and \code{"1->2"}, specifying
+covariates for each transition separately.
+}
+In all cases, the union of covariates is passed to \code{prepare_data()},
+and used as conditioning vector in the variational autoencoder
+while \code{fit_model()} receives the per-transition specification.
 These are automatically scaled/encoded in the process.}
 
 \item{m}{Integer. Number of fitted multi-state models that will contribute to the pooled estimates.}
@@ -46,8 +56,14 @@ These are automatically scaled/encoded in the process.}
 \item{distribution}{A character string specifying the parametric form of baseline hazards.
 Must be one of the distributions available in \code{flexsurv::flexsurvreg}, e.g., \code{"weibull"}, \code{"exponential"}, \code{"gompertz"}.}
 
-\item{custom_formula}{Optional \code{survival::Surv()} formula used for all transitions in the multi-state fit.
-If \code{NULL}, formulas are built automatically from \code{cov_vector} (assuming linear effects).}
+\item{custom_formula}{An optional specification of survival formulas:
+\itemize{
+\item If \code{NULL} (default), formulas are constructed automatically from
+\code{cov_vector}, allowing different covariates per transition (assuming linear effects).
+\item If a single \code{Surv()} formula, it is used for all transitions in the multi-state fit.
+\item If a list of three \code{Surv()} formulas, each element is used for
+the corresponding transition (1, 2, 3).
+}}
 
 \item{lab_prop}{Numeric in (0, 1). Controls the PU-learning thresholding used to derive soft labels for training:
 among patients with \code{onset == 0}, those below the \code{lab_prop}-quantile of PU risk scores are treated
@@ -63,6 +79,12 @@ the PU-learning routine. Supported keys:
 \item{shrink_k}{Non-negative shrinkage parameter to penalize regions with low labeling propensity.}
 \item{verbose}{Logical. If \code{TRUE}, prints PU-learning training diagnostics.}
 }}
+
+\item{features_prop_add}{Optional character vector of additional selection (propensity) features to append
+to the fixed default selection features used inside \code{\link{pu_learning}}.
+Use this only for covariates that plausibly affect the observation/labeling process.
+\strong{Warning:} adding variables overlapping with \code{cov_vector}
+can induce leakage/identifiability issues in SAR-PU and may destabilize EM updates.}
 
 \item{cvae_args}{Named list of training hyperparameters overriding \code{.default_cvae_args}.
 These entries are converted to command-line flags and passed to the Python training script \code{train.py}.

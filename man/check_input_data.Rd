@@ -4,7 +4,7 @@
 \alias{check_input_data}
 \title{Check input data structure and content}
 \usage{
-check_input_data(data)
+check_input_data(data, covariates = character(0))
 }
 \arguments{
 \item{data}{A \code{data.table} or \code{data.frame} that must contain the following columns:
@@ -18,18 +18,22 @@ check_input_data(data)
 \item \code{visits}: Indicator of the current visit (numeric).
 The \code{data.frame} can contain extra columns with covariate values.
 }}
+
+\item{covariates}{Character vector of covariate names to keep in addition to
+the required columns. Any other column will be dropped.}
 }
 \value{
-Invisibly returns \code{data} (possibly coerced to \code{data.table}) with an
-attribute \code{"na_index"} containing a \code{data.frame} with the locations of
-missing values in required columns (columns: \code{row}, \code{col}). If no missing
-values are present, the attribute is \code{NULL}.
+Invisibly returns \code{data} (possibly coerced to \code{data.table}) restricted
+to required columns + \code{covariates}, with an attribute \code{"na_index"} containing
+a \code{data.frame} with the locations of missing values in the kept columns
+(columns: \code{row}, \code{col}). If no missing values are present, the attribute is \code{NULL}.
 }
 \description{
 This function validates that the input object is a \code{data.frame} / \code{data.table}
 with the required columns and reasonable values. It:
 \itemize{
 \item Checks that all required columns are present.
+\item Optionally keeps only required columns + selected covariates (drops everything else).
 \item Checks and (if possible) coerces column types.
 \item Checks that binary variables are 0/1.
 \item Warns about missing values and returns their locations as an attribute.

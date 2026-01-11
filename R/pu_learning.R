@@ -1,35 +1,36 @@
 #' Positive-unlabelled learning under a Selected-At-Random assumption
 #'
-#' This function implements an Expectation-maximization PositiveUnlabeled (PU) learning algorithm under
-#' SelectionAtRandom (SAR) model for the labeling mechanism. It estimates:
+#' Implements an EM-based Positive–Unlabelled (PU) learning algorithm under a
+#' Selected-At-Random (SAR) model for the labeling mechanism. It estimates:
 #' \itemize{
-#'   \item \eqn{p(x) = P(Y = 1 \mid X_p)}: probability of developing the disease given a set of
-#'          classification features \code{features_cl};
-#'   \item \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)}: propensity score, probability that a truly
-#'         positive case is labeled as positive, given the selection
-#'         features \code{features_prop};
-#'   \item the posterior probability \eqn{r = P(Y = 1 \mid X_p, X_e, S)} for unlabeled examples.
+#'   \item \eqn{p(x)=P(Y=1 \mid X_p)}: probability of developing the disease given classification features
+#'         \code{features_cl};
+#'   \item \eqn{e(x)=P(S=1 \mid Y=1, X_e)}: selection/labeling propensity for truly positive cases, modeled using a
+#'         fixed default set of selection features (see Details) plus any user-supplied additions \code{features_prop_add};
+#'   \item \eqn{r=P(Y=1 \mid X_p, X_e, S)}: posterior probability for unlabeled examples.
 #' }
 #'
-#'
-#' @param df A \code{data.frame} or \code{data.table} containing at least the
-#'   following columns:
+#' @param df A \code{data.frame} or \code{data.table} containing at least:
 #'   \itemize{
 #'     \item \code{patient_id}: unique patient identifier;
-#'     \item \code{onset}: observed label indicator \code{S} (1 if the patient
-#'           is labeled positive, 0 otherwise);
+#'     \item \code{onset}: observed label indicator \code{S} (1 if labeled positive, 0 otherwise);
 #'     \item all variables listed in \code{features_cl};
-#'     \item all variables listed in \code{features_prop}.
+#'     \item all default selection features (see Details) and any variables listed in \code{features_prop_add}.
 #'   }
 #'   The function assumes one row per patient.
-#' @param features_cl Character vector with the names of the covariates used
-#'   to model the disease probability.
-#' @param features_prop Character vector with the names of the features explaining the
-#'   observation process or dependent on the follow-up itself.
-#' @param pu_args Named list of optional arguments controlling the EM algorithm.
-#'   Supported keys are:
+#'
+#' @param features_cl Character vector of covariate names used to model disease probability \eqn{p(x)}.
+#' @param features_prop_add Optional character vector of additional covariates to append to the
+#'   fixed default selection feature set used to model the labeling mechanism \eqn{e(x)}.
+#'   These should capture the observation/follow-up process.
+#'   \strong{Warning:} Adding variables that overlap with \code{features_cl}
+#'   may introduce identifiability issues (the selection model may absorb disease signal), add them
+#'   only if there's strong evidence that the variables are related to both the disease
+#'   probability and the likelihood of being observed.
+#'
+#' @param pu_args Named list of optional arguments controlling the EM algorithm. Supported keys:
 #'   \itemize{
-#'     \item \code{max_iter}: Integer, maximum number of EM iterations (default \code{800}).
+#'     \item \code{max_iter}: Integer, maximum number of EM iterations (default \code{1000}).
 #'     \item \code{tol}: Numeric, convergence tolerance on the log-likelihood difference (default \code{1e-3}).
 #'     \item \code{clip}: Numeric, probability clipping bound for numerical stability (default \code{1e-3}).
 #'     \item \code{damp}: Numeric in \eqn{(0,1)}, damping factor for convex updates of \eqn{p(x)} and \eqn{e(x)}
@@ -40,60 +41,51 @@
 #'           (default \code{FALSE}).
 #'   }
 #'   Any provided values override the defaults.
-
 #'
 #' @details
-#' The function uses an EM-like procedure:
+#' The SAR selection model uses a \emph{fixed, non-editable} default selection feature set:
+#' \itemize{
+#'   \item \code{interval}
+#'   \item \code{visit_rate}
+#'   \item \code{number_visits}
+#' }
+#' Users may only append additional selection covariates via \code{features_prop_add}.
+#'
+#' The EM-like procedure is:
 #' \enumerate{
-#'   \item Initialize \code{p(x)} and \code{e(x)} under SCAR assumption.
-#'   \item Alternates between:
-#'         \itemize{
-#'           \item \strong{E-step:} computes posterior probabilities
-#'                 \eqn{r = P(Y = 1 \mid X_p, X_e, S)} for unlabeled examples;
-#'           \item \strong{M-step for \eqn{p(x)}:} fits a quasi-binomial GLM
-#'                 of \code{r} on \code{features_cl};
-#'           \item \strong{M-step for \eqn{e(x)}:} fits a weighted logistic GLM
-#'                 for the selection probability usingon \code{features_prop};
-#'         }
-#'   \item Calibrates the intercept of \eqn{e(x)} so that
-#'         \eqn{E[p(x) e(x)] \approx \bar{S}}, the observed fraction of labeled
-#'         positives.
+#'   \item Initialize \eqn{p(x)} and \eqn{e(x)} under SCAR.
+#'   \item Alternate:
+#'     \itemize{
+#'       \item \strong{E-step:} compute \eqn{r=P(Y=1 \mid X_p,X_e,S)} for unlabeled examples;
+#'       \item \strong{M-step for \eqn{p(x)}:} fit a quasi-binomial GLM of \code{r} on \code{features_cl};
+#'       \item \strong{M-step for \eqn{e(x)}:} fit a weighted logistic GLM for \code{S} on the selection features.
+#'     }
+#'   \item Calibrate the intercept of \eqn{e(x)} so that \eqn{E[p(x)e(x)] \approx \bar{S}}.
 #' }
 #'
-#' @return A \code{tibble} with one row per patient and the following columns:
+#' @return A \code{tibble} with one row per patient and:
 #' \itemize{
-#'   \item \code{patient_id}: patient identifier copied from \code{df};
-#'   \item \code{onset}: observed label indicator \code{S};
-#'   \item \code{fhat}: initial estimate \eqn{P(S = 1 \mid X_p)} under SCAR from a
-#'         logistic regression of \code{S} on \code{features_cl};
-#'   \item \code{p_pos}: final estimate \eqn{p(x) = P(Y = 1 \mid X_p)}, i.e.
-#'         of the disease probability based on \code{features_cl};
-#'   \item \code{e_prop}: final estimate \eqn{e(x) = P(S = 1 \mid Y = 1, X_e)},
-#'         the selection probability;
-#'   \item \code{r}: posterior probability \eqn{P(Y = 1 \mid X_p, X_e, S)}; that equals
-#'         \code{1} for labeled positives (\code{S = 1}) and lies in \eqn{(0,1)}
-#'         for unlabeled cases;
-#'   \item \code{f_recon}: reconstructed probability \eqn{P(S = 1 \mid X_e, X_p)} under
-#'         the SAR model, given by \code{p(x)} * \code{e(x)}. Its average should be
-#'         close to the observed fraction of labeled positives \code{mean(S)}.
+#'   \item \code{patient_id}, \code{onset}
+#'   \item \code{fhat}: initial \eqn{P(S=1 \mid X_p)} (SCAR init)
+#'   \item \code{p_pos}: final \eqn{p(x)=P(Y=1 \mid X_p)}
+#'   \item \code{e_prop}: final \eqn{e(x)=P(S=1 \mid Y=1, X_e)}
+#'   \item \code{r}: posterior \eqn{P(Y=1 \mid X_p,X_e,S)}
+#'   \item \code{f_recon}: reconstructed \eqn{P(S=1 \mid X_p,X_e)} = \code{p_pos} * \code{e_prop}
 #' }
 #'
 #' @examples
 #' \dontrun{
-#' # Suppose df_patients has one row per patient and includes:
-#' # patient_id, onset, length_followup, number_visits, and some disease associated covariates
-#' features_cl   <- c("bmi0", "Hypertension", "Dyslipidemia")
-#' features_prop <- c("length_followup", "number_visits")
+#' features_cl <- c("bmi0", "Hypertension", "Dyslipidemia")
+#' # default selection features are always used: length_followup, number_visits
+#' # optionally append more selection features:
+#' features_prop_add <- c("n_clinic_contacts")
 #'
 #' pu_res <- pu_learning(
-#'   df            = df_patients,
-#'   features_cl   = features_cl,
-#'   features_prop = features_prop,
-#'   max_iter      = 200,
-#'   tol           = 1e-4,
-#'   verbose       = TRUE
+#'   df              = df_patients,
+#'   features_cl     = features_cl,
+#'   features_prop_add = features_prop_add,
+#'   pu_args         = list(max_iter = 200, tol = 1e-4, verbose = TRUE)
 #' )
-#'
 #' head(pu_res)
 #' }
 #'
@@ -102,11 +94,24 @@
 #' @importFrom stats qlogis plogis uniroot
 #' @importFrom tibble tibble
 #' @export
-#'
-#'
-pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
-  stopifnot(all(c("patient_id","onset") %in% names(df)))
-  eps <- 1e-12
+pu_learning <- function(df, features_cl, features_prop_add = NULL, pu_args = list()) {
+
+  stopifnot(all(c("patient_id", "onset") %in% names(df)))
+
+  # --- fixed defaults (non-editable)
+  default_features_prop <- c("interval", "visit_rate", "number_visits")
+
+
+  default_pu_args <- list(
+    max_iter = 1000,
+    tol = 1e-3,
+    clip = 1e-3,
+    damp = 0.3,
+    shrink_k = 0.0,
+    verbose = FALSE
+  )
+
+  pu_args <- modifyList(default_pu_args, pu_args)
 
   max_iter <- pu_args$max_iter
   tol      <- pu_args$tol
@@ -115,10 +120,20 @@ pu_learning <- function(df, features_cl, features_prop, pu_args = list()) {
   shrink_k <- pu_args$shrink_k
   verbose  <- pu_args$verbose
 
+  # --- build selection feature set: defaults + user additions
+  features_prop <- default_features_prop
+  if (!is.null(features_prop_add)) {
+    features_prop <- unique(c(features_prop, features_prop_add))
+  }
+
+
+  eps <- 1e-12
+
   # -- build model matrices
   Xp <- model.matrix(reformulate(features_cl), df)
-  Xp_noage <- model.matrix(reformulate(features_cl[features_cl!="age"]), df)
+  Xp_noage <- model.matrix(reformulate(features_cl[features_cl != "age"]), df)
   Xe <- model.matrix(reformulate(features_prop), data = df)
+
   Xp_n <- Xp[, -1, drop = FALSE]
   Xp_noage_n <- Xp_noage[, -1, drop = FALSE]
   Xe_n <- Xe[, -1, drop = FALSE]
