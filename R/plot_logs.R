@@ -76,12 +76,6 @@ plot_streams_total_and_fixmatch <- function(
 ) {
   fixmatch_line <- match.arg(fixmatch_line)
 
-  if (!requireNamespace("ggplot2", quietly = TRUE) ||
-      !requireNamespace("tidyr", quietly = TRUE) ||
-      !requireNamespace("dplyr", quietly = TRUE)) {
-    stop("Please install ggplot2, tidyr, dplyr for these plots.")
-  }
-
   # ---- Plot 1: total loss train vs val
   df_total <- logs |>
     dplyr::select(epoch, train_total, val_total) |>
