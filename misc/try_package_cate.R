@@ -1,5 +1,8 @@
-library(devtools)
-load_all()
+#library(devtools)
+#load_all()
+install.packages("remotes")
+remotes::install_github("Alepescinaa/STREAMS", ref = "master")
+library(STREAMS)
 panel_data <- simulation_ready_001[[2]]
 cov_vector <- c("cov1", "cov2", "cov3")
 check_input_data(panel_data)
