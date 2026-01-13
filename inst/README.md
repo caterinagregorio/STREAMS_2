@@ -38,3 +38,22 @@ Install Python dependencies on this path:
 ``` bash
 'complete path' -m pip install -r requirements.txt
 ```
+
+## Install Python dependencies from R
+
+Alternativly the following R code can be used to install dependances:
+
+``` r
+library(reticulate)
+
+py <- import("sys")$executable
+system2(py, c("-m", "ensurepip", "--default-pip"))
+system2(py, c("-m", "pip", "--version"))
+system2(py, c("-m", "pip", "install",
+              "numpy>=1.20",
+              "torch>=1.12",
+              "pyarrow>=7.0",
+              "scikit-learn>=1.0",
+              "tqdm>=4.0",
+              "pandas>=1.3"))
+```
