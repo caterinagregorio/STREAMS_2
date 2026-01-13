@@ -1,14 +1,40 @@
 ## Python utilities for the R package
 
-This folder contains Python code used internally by the R package.  
-The script `train.py` implements a Mean Teacher conditional variational autoencoder
-generating a individual-level posterior distribution for disease onset and onset age.
-Thr script `inference.py` leverages the model for prediction.
-It is intended to be called directly in Python.
+This folder contains Python code used internally by the R package.\
+The script `train.py` implements a Mean Teacher conditional variational autoencoder generating a individual-level posterior distribution for disease onset and onset age. Thr script `inference.py` leverages the model for prediction. It is intended to be called directly in Python.
 
 ## 📦 Install Python dependencies
 
 Before using the Python scripts, install the required modules:
 
-```bash
+``` bash
 pip install -r requirements.txt
+```
+
+## Check Python version
+
+These two should be the same.
+
+R console:
+
+``` r
+system2("python", args = "--version")
+```
+
+Terminal:
+
+``` bash
+python --version
+```
+
+If they don't check the path used by R:
+
+``` r
+system2("python", args = "-c \"import sys; print(sys.executable)\"")
+```
+
+Install Python dependencies on this path:
+
+``` bash
+'complete path' -m pip install -r requirements.txt
+```
