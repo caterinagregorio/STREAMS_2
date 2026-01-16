@@ -41,7 +41,7 @@ Install Python dependencies on this path:
 
 ## Install Python dependencies from R
 
-Alternativly the following R code can be used to install dependances:
+Alternatively the following R code can be used to install dependencies:
 
 ``` r
 library(reticulate)

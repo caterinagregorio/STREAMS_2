@@ -53,41 +53,33 @@ streams_python <- function(
     python = "python3",
     pkg = "STREAMS"
 ) {
-  ...
-}
-
-streams_python <- function(
-    script,
-    args = character(),
-    python = "python3",
-    pkg = "STREAMS"
-) {
-
+  # 1. Trova lo script Python nel pacchetto
   script_path <- system.file(script, package = pkg)
   if (!nzchar(script_path) || !file.exists(script_path)) {
     stop("Python script not found: ", script, call. = FALSE)
   }
 
+  # 2. Risolvi l'interprete Python
   py <- Sys.which(python)
   if (!nzchar(py)) {
     stop("Python interpreter not found: ", python, call. = FALSE)
   }
 
-
+  # 3. Verifica versione Python >= 3
   ver <- system2(py, "--version", stdout = TRUE, stderr = TRUE)
   if (any(grepl("Python 2", ver))) {
     stop("Python >= 3 required. Found: ", ver, call. = FALSE)
   }
 
+  # 4. Prepara gli argomenti:
+  #    - normalizzi SOLO lo script_path (è un path reale)
+  #    - gli args vengono solo quotati, NON passano da normalizePath
+  script_arg <- shQuote(normalizePath(script_path, winslash = "/", mustWork = TRUE))
+  args_quoted <- vapply(args, shQuote, character(1))
 
-  q <- function(x) shQuote(normalizePath(x, winslash = "/", mustWork = FALSE))
+  cmd_args <- c(script_arg, args_quoted)
 
-  cmd_args <- c(
-    q(script_path),
-    vapply(args, q, character(1))
-  )
-
-
+  # 5. Esegui Python
   out <- system2(py, args = cmd_args, stdout = TRUE, stderr = TRUE)
   status <- attr(out, "status")
 

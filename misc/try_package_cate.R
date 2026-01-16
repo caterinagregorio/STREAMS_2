@@ -10,7 +10,7 @@ check_input_data(panel_data)
 fit_streams <- run_streams(
   data = panel_data,
   cov_vector = cov_vector,
-  python = Sys.which("python3"),
+  python = Sys.which("python"),
   pu_args = list(verbose = TRUE),
   features_prop_add = NULL
 )
