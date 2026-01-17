@@ -13,17 +13,17 @@ devtools::install_github("Alepescinaa/STREAMS")
 
 library(STREAMS)
 
-# load example panel data
+# Load example panel data
 data("toy_example")
 panel_data <- toy_example
 
-# covariates to be used in the model
+# Covariates to be used in the model
 cov_vector <- c("cov1", "cov2", "cov3")
 
-# (optional) sanity check on the input structure
+# Sanity check on the input structure (optional, it is nested in main pipeline)
 check_input_data(panel_data)
 
-# run the main pipeline
+# Run the main pipeline
 
 fit_streams <- run_streams(
   data              = panel_data,
@@ -33,11 +33,11 @@ fit_streams <- run_streams(
   features_prop_add = NULL
 )
 
-# overall object
+# Overall object
 class(fit_streams)
 summary(fit_streams, plots = TRUE)
 
-# first transition model
+# First transition model
 trans1_streams <- fit_streams[[1L]]
 class(trans1_streams)
 
