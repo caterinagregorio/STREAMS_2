@@ -2,7 +2,7 @@ Package: STREAMS
 Title: Semi-supervised Trajectory REconstruction Across interval-censored Multi-State models
 Version: 0.0.0.9000
 Authors@R: 
-    person("Alessandra", "Pescina", , "pescina.alessandra@gmail.com", role = c("aut", "cre"))
+    person("Alessandra", "Pescina", , "pescinaalessandra@gmail.com", role = c("aut", "cre"))
 Description: STREAMS is an R package for end-to-end estimation of progressive illness–death multi-state models from 
             longitudinal visit-level data with partially observed disease onset. The pipeline trains 
             a conditional variational autoencoder (CVAE) with a mean-teacher consistency constraint to model onset 
@@ -27,3 +27,6 @@ Imports:
     tidyr, 
     pROC, 
     ggplot2
+Depends: 
+    R (>= 3.5)
+LazyData: true
