@@ -16,6 +16,7 @@ run_streams(
   features_prop_add = NULL,
   cvae_args = list(),
   infer_args = list(),
+  varmethod = "rubin",
   python = Sys.which("python"),
   out_dir = NULL,
   keep_intermediate = FALSE,
@@ -121,6 +122,8 @@ Common keys in STREAMS are:
 \item{mc_samples}{Number of Monte Carlo samples for stochastic inference.}
 \item{batch_size}{Mini-batch size used at inference.}
 }}
+
+\item{varmethod}{character indication type of variance calculation: "rubin" or "jaccknife"}
 
 \item{python}{Character. Path to the Python executable used to run \code{train.py} and \code{inference.py}.
 Defaults to \code{Sys.which("python")}; if empty/NULL, a fallback such as \code{"python3"} may be used.}
