@@ -20,6 +20,30 @@
   list(Qbar = Qbar, Ubar = Ubar, B = B, Tcov = Tcov, df = df, m = m)
 }
 
+.pool_jackknife <- function(Q, U_list) {
+  m <- nrow(Q)
+  Qbar <- colMeans(Q)
+
+  # Ubar for reporting only
+  Ubar <- Reduce(`+`, U_list) / m
+
+  # MI-jackknife variance
+  B <- stats::cov(Q)
+  Tcov <- ((m - 1) / m) * B
+
+  df <- rep(Inf, length(Qbar))
+
+  list(
+    Qbar = Qbar,
+    Ubar = Ubar,
+    B = B,
+    Tcov = Tcov,
+    df = df,
+    m = m,
+    method = "MI-jackknife pooling"
+  )
+}
+
 .strip_flexsurvreg <- function(obj, keep = c(
   "call", "ncovs", "ncoveffs", "basepars", "covpars", "concat.formula",
   "cov", "coefficients", "npars", "fixedpars", "optpars"
@@ -39,7 +63,7 @@
   )
 }
 
-pool_rubin_one_model <- function(fits, cl = 0.95) {
+pool_rubin_one_model <- function(fits, cl = 0.95,method="rubin") {
 
   fits <- Filter(function(f) inherits(f, "flexsurvreg"), fits)
   if (length(fits) < 2)
@@ -57,7 +81,12 @@ pool_rubin_one_model <- function(fits, cl = 0.95) {
   Q <- do.call(rbind, lapply(fits, stats::coef))
   U_list <- lapply(fits, stats::vcov)
 
-  rub <- .pool_rubin(Q, U_list)
+  if(method=="rubin"){
+    rub <- .pool_rubin(Q, U_list)
+  }
+  if(method=="jackknife"){
+    rub <- .pool_jackknife(Q, U_list)
+  }
 
   pooled <- .strip_flexsurvreg(fits[[1]])
   pooled$coefficients <- rub$Qbar
@@ -72,7 +101,7 @@ pool_rubin_one_model <- function(fits, cl = 0.95) {
 
 pool_rubin_all_transitions <- function(
     all_fits, cl = 0.95,
-    distribution, clock_assumption, cov_vector, custom_formula,
+    distribution, clock_assumption, cov_vector, custom_formula,method="rubin",
     loss_plots = NULL,
     logs_cols  = NULL
 ) {
@@ -95,7 +124,7 @@ pool_rubin_all_transitions <- function(
 
   # --- single-transition fit
   if (inherits(template, "flexsurvreg")) {
-    pooled <- pool_rubin_one_model(all_fits, cl = cl)
+    pooled <- pool_rubin_one_model(all_fits, cl = cl,method=method)
     attr(pooled, "metadata") <- metadata
     return(pooled)
   }

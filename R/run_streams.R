@@ -106,7 +106,7 @@
 #'     \item{mc_samples}{Number of Monte Carlo samples for stochastic inference.}
 #'     \item{batch_size}{Mini-batch size used at inference.}
 #'   }
-#'
+#'@param varmethod character indication type of variance calculation: "rubin" or "jaccknife"
 #' @param python Character. Path to the Python executable used to run \code{train.py} and \code{inference.py}.
 #'   Defaults to \code{Sys.which("python")}; if empty/NULL, a fallback such as \code{"python3"} may be used.
 #' @param out_dir Character. Directory used to store intermediate artifacts (Feather inputs/outputs, logs, model checkpoint).
@@ -169,6 +169,7 @@ run_streams <- function(
 
     # --- Inference ---
     infer_args = list(),
+    varmethod="rubin",
 
     # --- Execution ---
     python = Sys.which("python"),
@@ -375,7 +376,7 @@ run_streams <- function(
   # Pooling with Rubin's rules
   #-------------------------------------
 
-  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95, distribution, clock_assumption, cov_vector, custom_formula, loss_plots, logs_cols)
+  pooled_fit <- pool_rubin_all_transitions(all_fits, cl = 0.95, distribution, clock_assumption, cov_vector, custom_formula, loss_plots, logs_cols,method=varmethod)
 
 
   return(pooled_fit)
