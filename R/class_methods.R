@@ -76,8 +76,8 @@ confint.flexsurvreg_pooled <- function(object, parm = NULL, level = 0.95, ...) {
 #' @exportS3Method base::print flexsurvreg_pooled
 print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3L), ...) {
 
-  if(object$varmethod=="rubin") var <- .get_rubin(object)
-  if(object$varmethod=="jackknife")var <- .get_jackknife(object)
+  if(x$varmethod=="rubin") var <- .get_rubin(x)
+  if(x$varmethod=="jackknife")var <- .get_jackknife(x)
 
   var <- .get_varin(x)
   est <- var$Qbar
@@ -96,8 +96,8 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
     row.names = names(est)
   )
 
-  if(object$varmethod=="rubin")  cat("Pooled flexsurvreg (Variance calculated with Rubin's rule)\n")
-  if(object$varmethod=="jackknife") cat("Pooled flexsurvreg (Jackknife variance calculated)\n")
+  if(x$varmethod=="rubin")  cat("Pooled flexsurvreg (Variance calculated with Rubin's rule)\n")
+  if(x$varmethod=="jackknife") cat("Pooled flexsurvreg (Jackknife variance calculated)\n")
 
   if (!is.null(x$dist)) cat("Distribution:", x$dist, "\n")
   if (!is.null(rub$m))   cat("m imputations:", rub$m, "\n\n")
