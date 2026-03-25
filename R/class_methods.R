@@ -7,7 +7,7 @@
 
 #' @noRd
 .get_jackknife <- function(x) {
-  rub <- attr(x, "jaccknife", exact = TRUE)
+  rub <- attr(x, "jackknife", exact = TRUE)
   if (is.null(rub)) stop("Missing Jackknife diagnostics in attr(x, 'rubin').")
   rub
 }
@@ -99,7 +99,7 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
   if(x$varmethod=="jackknife") cat("Pooled flexsurvreg (Jackknife variance calculated)\n")
 
   if (!is.null(x$dist)) cat("Distribution:", x$dist, "\n")
-  if (!is.null(rub$m))   cat("m imputations:", rub$m, "\n\n")
+  if (!is.null(var$m))   cat("m imputations:", var$m, "\n\n")
 
   print(round(tab, digits = digits))
   invisible(x)
