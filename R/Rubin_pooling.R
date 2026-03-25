@@ -81,10 +81,10 @@ pool_rubin_one_model <- function(fits, cl = 0.95,varmethod) {
   Q <- do.call(rbind, lapply(fits, stats::coef))
   U_list <- lapply(fits, stats::vcov)
 
-  if(method=="rubin"){
+  if(varmethod=="rubin"){
     rub <- .pool_rubin(Q, U_list)
   }
-  if(method=="jackknife"){
+  if(varmethod=="jackknife"){
     rub <- .pool_jackknife(Q, U_list)
   }
 
@@ -93,10 +93,10 @@ pool_rubin_one_model <- function(fits, cl = 0.95,varmethod) {
   pooled$cov          <- rub$Tcov
 
 
-  if(method=="rubin"){
+  if(varmethod=="rubin"){
     attr(pooled, "rubin") <- rub
   }
-  if(method=="jackknife"){
+  if(varmethod=="jackknife"){
     attr(pooled, "jackknife") <- rub
   }
   class(pooled) <- "flexsurvreg_pooled"
@@ -134,7 +134,7 @@ pool_rubin_all_transitions <- function(
 
   # --- single-transition fit
   if (inherits(template, "flexsurvreg")) {
-    pooled <- pool_rubin_one_model(all_fits, cl = cl,method=method)
+    pooled <- pool_rubin_one_model(all_fits, cl = cl,varmethod=varmethod)
     attr(pooled, "metadata") <- metadata
     return(pooled)
   }
