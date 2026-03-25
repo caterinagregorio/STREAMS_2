@@ -152,7 +152,7 @@ pool_rubin_all_transitions <- function(
       pooled_list[[k]]$varmethod <- varmethod
     }
 
-
+    names(pooled_list) <- c("Trans: 1->2","Trans: 1->3","Trans: 2->3")
     class(pooled_list) <- "flexsurvreg_pooled_multistate"
 
     # attach ALL metadata (including loss_plots if present)
