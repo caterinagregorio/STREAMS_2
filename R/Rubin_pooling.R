@@ -81,10 +81,10 @@ pool_rubin_one_model <- function(fits, cl = 0.95,varmethod) {
   Q <- do.call(rbind, lapply(fits, stats::coef))
   U_list <- lapply(fits, stats::vcov)
 
-  if(method=="rubin"){
+  if(varmethod=="rubin"){
     rub <- .pool_rubin(Q, U_list)
   }
-  if(method=="jackknife"){
+  if(varmethod=="jackknife"){
     rub <- .pool_jackknife(Q, U_list)
   }
 
