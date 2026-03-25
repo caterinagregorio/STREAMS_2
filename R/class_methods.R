@@ -5,6 +5,13 @@
   rub
 }
 
+#' @noRd
+.get_jackknife <- function(x) {
+  rub <- attr(x, "jaccknife", exact = TRUE)
+  if (is.null(rub)) stop("Missing Jackknife diagnostics in attr(x, 'rubin').")
+  rub
+}
+
 
 #------------------------------------------------------------
 # coef / vcov
@@ -28,12 +35,13 @@ vcov.flexsurvreg_pooled <- function(object, ...) {
 #' @exportS3Method stats::confint flexsurvreg_pooled
 confint.flexsurvreg_pooled <- function(object, parm = NULL, level = 0.95, ...) {
 
-  rub <- .get_rubin(object)
+  if(object$varmethod=="rubin") var <- .get_rubin(object)
+  if(object$varmethod=="jackknife")var <- .get_jackknife(object)
 
-  est <- rub$Qbar
-  V   <- rub$Tcov
+  est <- var$Qbar
+  V   <- var$Tcov
   se  <- sqrt(diag(V))
-  df  <- rub$df
+  df  <- var$df
   names(df) <- names(est)
 
   if (!is.null(parm)) {
@@ -64,10 +72,14 @@ confint.flexsurvreg_pooled <- function(object, parm = NULL, level = 0.95, ...) {
 #' @noRd
 #' @exportS3Method base::print flexsurvreg_pooled
 print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3L), ...) {
-  rub <- .get_rubin(x)
-  est <- rub$Qbar
-  se  <- sqrt(diag(rub$Tcov))
-  df  <- rub$df
+
+  if(object$varmethod=="rubin") var <- .get_rubin(object)
+  if(object$varmethod=="jackknife")var <- .get_jackknife(object)
+
+  var <- .get_varin(x)
+  est <- var$Qbar
+  se  <- sqrt(diag(var$Tcov))
+  df  <- var$df
   level <- 0.95
 
   ci <- confint.flexsurvreg_pooled(x, level = level)
@@ -81,7 +93,9 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
     row.names = names(est)
   )
 
-  cat("Pooled flexsurvreg (Rubin's rules)\n")
+  if(object$varmethod=="rubin")  cat("Pooled flexsurvreg (Variance calculated with Rubin's rule)\n")
+  if(object$varmethod=="jackknife") cat("Pooled flexsurvreg (Jackknife variance calculated)\n")
+
   if (!is.null(x$dist)) cat("Distribution:", x$dist, "\n")
   if (!is.null(rub$m))   cat("m imputations:", rub$m, "\n\n")
 
@@ -97,11 +111,12 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
 #' @exportS3Method stats::summary flexsurvreg_pooled
 summary.flexsurvreg_pooled <- function(object, level = 0.95, ...) {
 
-  rub <- .get_rubin(object)
+  if(object$varmethod=="rubin") var <- .get_rubin(object)
+  if(object$varmethod=="jackknife")var <- .get_jackknife(object)
 
-  est <- rub$Qbar
-  se  <- sqrt(diag(rub$Tcov))
-  df  <- rub$df
+  est <- var$Qbar
+  se  <- sqrt(diag(var$Tcov))
+  df  <- var$df
 
   alpha <- 1 - level
   crit <- vapply(df, function(d) {
@@ -121,7 +136,7 @@ summary.flexsurvreg_pooled <- function(object, level = 0.95, ...) {
   out <- list(
     call  = object$call,
     table = tab,
-    rubin = rub,
+    variance = var,
     level = level
   )
 
@@ -145,13 +160,15 @@ summary.flexsurvreg_pooled_multistate <- function(
 
   m <- NULL
   if (length(object) > 0) {
-    rub <- attr(object[[1]], "rubin", exact = TRUE)
-    if (!is.null(rub) && !is.null(rub$m)) m <- rub$m
+    if(object$varmethod=="rubin") var <- .get_rubin(object)
+    if(object$varmethod=="jackknife")var <- .get_jackknife(object)
+    if (!is.null(var) && !is.null(var$m)) m <- var$m
   }
 
   cat("\nPooled multi-state model (flexsurv)\n")
   cat(strrep("-", nchar("Pooled multi-state model (flexsurv)")), "\n", sep = "")
-  cat("Each transition is fitted as a `flexsurvreg_pooled` model; parameters are pooled using Rubin's rules.\n")
+  if(object$varmethod=="rubin") cat("Each transition is fitted as a `flexsurvreg_pooled` model; parameters are pooled using Rubin's rule.\n")
+  if(object$varmethod=="jackknife")cat("Each transition is fitted as a `flexsurvreg_pooled` model; parameters are pooled using jackknife.\n")
   if (!is.null(m)) cat(sprintf("Imputations (m): %d\n", m))
   cat(sprintf("Transitions: %d\n", length(object)))
 

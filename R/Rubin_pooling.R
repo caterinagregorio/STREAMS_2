@@ -92,7 +92,13 @@ pool_rubin_one_model <- function(fits, cl = 0.95,method="rubin") {
   pooled$coefficients <- rub$Qbar
   pooled$cov          <- rub$Tcov
 
-  attr(pooled, "rubin") <- rub
+
+  if(method=="rubin"){
+    attr(pooled, "rubin") <- rub
+  }
+  if(method=="jackknife"){
+    attr(pooled, "jackknife") <- rub
+  }
   class(pooled) <- "flexsurvreg_pooled"
 
 
@@ -141,6 +147,7 @@ pool_rubin_all_transitions <- function(
     }
 
     names(pooled_list) <- names(template)
+    pooled_list$varmethod <- varmethod
     class(pooled_list) <- "flexsurvreg_pooled_multistate"
 
     # attach ALL metadata (including loss_plots if present)
