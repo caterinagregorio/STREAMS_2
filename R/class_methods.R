@@ -19,12 +19,15 @@
 #' @noRd
 #' @exportS3Method stats::coef flexsurvreg_pooled
 coef.flexsurvreg_pooled <- function(object, ...) {
-  .get_rubin(object)$Qbar
+  if(object$varmethod=="rubin") .get_rubin(object)$Qbar
+  if(object$varmethod=="jackknife").get_jackknife(object)$Qbar
+
 }
 #' @noRd
 #' @exportS3Method stats::vcov flexsurvreg_pooled
 vcov.flexsurvreg_pooled <- function(object, ...) {
-  .get_rubin(object)$Tcov
+  if(object$varmethod=="rubin") .get_rubin(object)$Tcov
+  if(object$varmethod=="jackknife").get_jackknife(object)$Tcov
 }
 
 #------------------------------------------------------------
