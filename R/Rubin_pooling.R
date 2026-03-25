@@ -148,10 +148,11 @@ pool_rubin_all_transitions <- function(
     for (k in seq_len(K)) {
       kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
       pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl,varmethod=varmethod)
+      names(pooled_list[[k]]) <- names(template)
+      pooled_list[[k]]$varmethod <- varmethod
     }
 
-    names(pooled_list) <- names(template)
-    pooled_list$varmethod <- varmethod
+
     class(pooled_list) <- "flexsurvreg_pooled_multistate"
 
     # attach ALL metadata (including loss_plots if present)
