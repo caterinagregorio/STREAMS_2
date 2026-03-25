@@ -137,7 +137,7 @@ pool_rubin_all_transitions <- function(
 
     for (k in seq_len(K)) {
       kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
-      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl)
+      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl,method=method)
     }
 
     names(pooled_list) <- names(template)
