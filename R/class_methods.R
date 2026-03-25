@@ -79,7 +79,6 @@ print.flexsurvreg_pooled <- function(x, digits = max(3L, getOption("digits") - 3
   if(x$varmethod=="rubin") var <- .get_rubin(x)
   if(x$varmethod=="jackknife")var <- .get_jackknife(x)
 
-  var <- .get_varin(x)
   est <- var$Qbar
   se  <- sqrt(diag(var$Tcov))
   df  <- var$df
