@@ -63,7 +63,7 @@
   )
 }
 
-pool_rubin_one_model <- function(fits, cl = 0.95,method="rubin") {
+pool_rubin_one_model <- function(fits, cl = 0.95,varmethod) {
 
   fits <- Filter(function(f) inherits(f, "flexsurvreg"), fits)
   if (length(fits) < 2)
@@ -107,7 +107,11 @@ pool_rubin_one_model <- function(fits, cl = 0.95,method="rubin") {
 
 pool_rubin_all_transitions <- function(
     all_fits, cl = 0.95,
-    distribution, clock_assumption, cov_vector, custom_formula,method="rubin",
+    distribution,
+    clock_assumption,
+    cov_vector,
+    custom_formula,
+    varmethod,
     loss_plots = NULL,
     logs_cols  = NULL
 ) {
@@ -143,7 +147,7 @@ pool_rubin_all_transitions <- function(
 
     for (k in seq_len(K)) {
       kth_fits <- lapply(all_fits, function(obj) if (is.list(obj)) obj[[k]] else NULL)
-      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl,method=method)
+      pooled_list[[k]] <- pool_rubin_one_model(kth_fits, cl = cl,varmethod=varmethod)
     }
 
     names(pooled_list) <- names(template)
