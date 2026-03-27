@@ -340,27 +340,38 @@ run_streams <- function(
 
   # --- Inverse sampling
   set.seed(seed)
-  c1 <- matrix(stats::runif(n_patients * m), nrow = n_patients, ncol = m)
 
   # cate modified
 
-  # teacher-student disagreement (absolute difference)
-  disc <- abs(dat$p_onset - distributions$p_onset_student)
+  # -------------------------------------------------------
+  #  STREAMS: IMPUTATION OF ONSET STATUS AND ONSET AGE
+  #  WITH LATENT-SPACE UNCERTAINTY AND m MULTIPLE IMPUTATIONS
+  # -------------------------------------------------------
 
-  # scaled uncertainty (using factor = 30)
-  sd_vec <- 30 * pmax(1e-4, disc)
+  # --- PARAMETERS ---
+  # dat$p_onset : teacher-probability (length n_patients)
+  # distributions$p_onset_student : student probability (same length)
+  # m : number of imputations
 
-  # build an n × m matrix of stochastic p_onset values
-  p_onset_mat <- plogis(
-    qlogis(dat$p_onset) +
-      matrix(rnorm(n_patients * m, sd = rep(sd_vec, m)),
-             nrow = n_patients, ncol = m)
-  )
+  # 1. Latent-mean (logit scale)
+  latent_mean <- qlogis(dat$p_onset)
 
-  # --- NEW: sample disease status using p_onset_mat instead of single p_onset ---
+  # 2. Latent-scale uncertainty (principled)
+  #    sqrt(p * (1-p)) is the natural Bernoulli variance shape
+  #    c = 2 is a reasonable default scale
+  latent_sd <- 2 * sqrt(dat$p_onset * (1 - dat$p_onset))
+
+  # 3. Independent latent noise for each (patient × imputation)
+  Z <- matrix(rnorm(n_patients * m), nrow = n_patients, ncol = m)
+
+  # 4. Construct p_onset_mat (n × m) with proper stochasticity
+  p_onset_mat <- plogis(latent_mean + latent_sd * Z)
+
+  # 5. Sample onset status using Bernoulli(p_onset_mat)
+  c1 <- matrix(runif(n_patients * m), nrow = n_patients, ncol = m)
   disease_status <- (p_onset_mat > c1) * 1
 
-  # --- sample disease age matrix (n_patients × m) ---
+  # 6. Sample onset age given onset status
   disease_age <- matrix(0, nrow = n_patients, ncol = m)
 
   for (i in 1:n_patients) {
@@ -369,16 +380,16 @@ run_streams <- function(
     a   <- dat$a[i]
     b   <- dat$b[i]
 
-    # ensure b_safe > a to avoid zero-width truncation
+    # Avoid degenerate truncation
     b_safe <- pmin(pmax(b - 1e-3, a + 1e-3), b)
 
     disease_age[i, ] <- vapply(disease_status[i, ], function(o) {
       if (o == 1) {
         sa <- sample_truncated_normal(mu, sig, a, b_safe)
-        if (is.na(sa)) warning(sprintf(
-          "NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
-          i, mu, sig, a, b, b_safe
-        ))
+        if (is.na(sa)) {
+          warning(sprintf("NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
+                          i, mu, sig, a, b, b_safe))
+        }
         sa
       } else {
         b
