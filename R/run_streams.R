@@ -336,24 +336,71 @@ run_streams <- function(
     p_onset = distributions$p_onset
   )
 
+
+
   # --- Inverse sampling
   set.seed(seed)
   c1 <- matrix(stats::runif(n_patients * m), nrow = n_patients, ncol = m)
-  disease_status <- (dat$p_onset > c1) * 1
 
+  # cate modified
+
+  # teacher-student disagreement (absolute difference)
+  disc <- abs(dat$p_onset - distributions$p_onset_student)
+
+  # scaled uncertainty (using factor = 30)
+  sd_vec <- 30 * pmax(1e-4, disc)
+
+  # build an n × m matrix of stochastic p_onset values
+  p_onset_mat <- plogis(
+    qlogis(dat$p_onset) +
+      matrix(rnorm(n_patients * m, sd = rep(sd_vec, m)),
+             nrow = n_patients, ncol = m)
+  )
+
+  # --- NEW: sample disease status using p_onset_mat instead of single p_onset ---
+  disease_status <- (p_onset_mat > c1) * 1
+
+  # --- sample disease age matrix (n_patients × m) ---
   disease_age <- matrix(0, nrow = n_patients, ncol = m)
+
   for (i in 1:n_patients) {
-    mu <- dat$age_mu[i]; sig <- dat$age_sd[i]; a <- dat$a[i]; b <- dat$b[i]
+    mu  <- dat$age_mu[i]
+    sig <- dat$age_sd[i]
+    a   <- dat$a[i]
+    b   <- dat$b[i]
+
+    # ensure b_safe > a to avoid zero-width truncation
     b_safe <- pmin(pmax(b - 1e-3, a + 1e-3), b)
+
     disease_age[i, ] <- vapply(disease_status[i, ], function(o) {
       if (o == 1) {
         sa <- sample_truncated_normal(mu, sig, a, b_safe)
-        if (is.na(sa)) warning(sprintf("NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
-                                       i, mu, sd, a, b, b_safe))
+        if (is.na(sa)) warning(sprintf(
+          "NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
+          i, mu, sig, a, b, b_safe
+        ))
         sa
-      } else b
+      } else {
+        b
+      }
     }, numeric(1))
   }
+
+  # disease_status <- (dat$p_onset > c1) * 1
+  #
+  # disease_age <- matrix(0, nrow = n_patients, ncol = m)
+  # for (i in 1:n_patients) {
+  #   mu <- dat$age_mu[i]; sig <- dat$age_sd[i]; a <- dat$a[i]; b <- dat$b[i]
+  #   b_safe <- pmin(pmax(b - 1e-3, a + 1e-3), b)
+  #   disease_age[i, ] <- vapply(disease_status[i, ], function(o) {
+  #     if (o == 1) {
+  #       sa <- sample_truncated_normal(mu, sig, a, b_safe)
+  #       if (is.na(sa)) warning(sprintf("NA at i=%d: mu=%f sd=%f a=%f b=%f b_safe=%f",
+  #                                      i, mu, sd, a, b, b_safe))
+  #       sa
+  #     } else b
+  #   }, numeric(1))
+  # }
 
   # --- fit multi-state
   if (.Platform$OS.type == "windows" && n_cores > 1) {
